@@ -31,5 +31,4 @@ Install the apworld in release by double clicking it
 Launch Archipelago Launcher and find Clone Drone Client.
 
 > [!IMPORTANT]
-> Connect to the world, then enter your game slot, AND ONLY THEN launch `Clone Drone in the Danger Zone.exe`. Otherwise data wont be send
-> If you leave the game, your data is saved. BUT you'll need to disconnet to the world (using the disconnect button) and redo the last part
+> Connect to the world, then enter your game slot, AND ONLY THEN launch `Clone Drone in the Danger Zone.exe`. Otherwise data wont be send. If you leave the game, your current progress in game (current endless level) is saved. BUT you'll need to disconnect to the world (using the disconnect button) and redo the last part to connect back
