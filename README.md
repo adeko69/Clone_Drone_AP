@@ -7,8 +7,8 @@ A Clone Drone in The Danger Zone Repository for Archipelago.
 - [BepInEx x64](https://github.com/bepinex/bepinex/releases). The game being x64, x86 won't work.
 - The `.apworld` and the `.dll` in the releases
 
-##Installation and patch Procedures
-###Windows
+## Installation and patch Procedures
+### Windows
 
 1. Locate `Clone Drone in the Danger Zone.exe` and `Clone Drone in the Danger Zone_Data/`, they are in the same file. Starting now, this location will be the "root" (also called `./` when moving in files). You can locate it inside Steam
 2. Close Steam entirely
@@ -20,12 +20,12 @@ A Clone Drone in The Danger Zone Repository for Archipelago.
 8. Go in `./BepInEx/plugins/`, it should be empty. Put `CloneDroneAP.dll` in here
 9. Launch the game from `Clone Drone in the Danger Zone.exe` while Steam is closed.
 
-##Check if patch is on
+## Check if patch is on
 
 10. Launch `Clone Drone in the Danger Zone.exe`, if Steam appears it will unpatch, so patch wont work. Go back to step 2 and 4 and try again
 11. If "Steam Connect Failed" appear, look at "Play Multiplayer" button. If it is greyed out but without a "Can't connect to online services", it means the patch is on. Click on Browse Workshop, it shouldnt work. Well down, your game is patched.
 
-##Joining a world
+## Joining a world
 
 Install the apworld in release by double clicking it
 Launch Archipelago Launcher and find Clone Drone Client.
