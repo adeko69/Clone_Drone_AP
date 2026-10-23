@@ -500,6 +500,38 @@ namespace CloneDroneAP
         }
     }
 
+    [HarmonyPatch(typeof(UpgradeManager), "IsUpgradeLockedByChallengeCompletion")]
+    public class UnlockChallengeUpgradesPatch
+    {
+        static bool Prefix(ref bool __result)
+        {
+            __result = false; // N'est jamais verrouillé par un challenge
+            return false;     // Ignore la méthode originale
+        }
+    }
+
+    // 2. Débloque les améliorations liées à l'avancement global du mode Histoire
+    [HarmonyPatch(typeof(UpgradeManager), "IsUpgradeLockedByLifetimeMetagameProgress")]
+    public class UnlockLifetimeMetagameUpgradesPatch
+    {
+        static bool Prefix(ref bool __result)
+        {
+            __result = false; // N'est jamais verrouillé par la méta-progression
+            return false;
+        }
+    }
+
+    // 3. Empêche l'interface de l'autel de griser certaines améliorations selon le chapitre actuel
+    [HarmonyPatch(typeof(UpgradeManager), "IsUpgradeLockedByCurrentMetagameProgress")]
+    public class UnlockCurrentMetagameUpgradesPatch
+    {
+        static bool Prefix(ref bool __result)
+        {
+            __result = false;
+            return false;
+        }
+    }
+
     [HarmonyPatch(typeof(UpgradeManager), "TryUpgradeAbility")]
     public class TryUpgradePatch
     {
