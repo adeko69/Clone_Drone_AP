@@ -1,13 +1,13 @@
 # Clone_Drone_AP
 A Clone Drone in The Danger Zone Repository for Archipelago.
 
-##Required Software
+## Required Software
 
 - A computer version of Clone Drone in the Danger Zone installed with/near Steam ID build `25044987` (Night Mode Update). apworld and patch v0.1.X should also works on The Enemy Zombie Adventure Update and later update, but some later feature won't work (ride or die upgrades). This version is potentially compatible with later version (purchasable from most online game stores)
 - [BepInEx x64](https://github.com/bepinex/bepinex/releases). The game being x64, x86 won't work.
 - The `.apworld` and the `.dll` in the releases
 
-## Installation and patch Procedures
+## Installation and Patch Procedures
 ### Windows
 
 1. Locate `Clone Drone in the Danger Zone.exe` and `Clone Drone in the Danger Zone_Data/`, they are in the same file. Starting now, this location will be the "root" (also called `./` when moving in files). You can locate it inside Steam
