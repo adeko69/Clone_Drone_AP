@@ -34,6 +34,62 @@ namespace CloneDroneAP
         public static string CurrentSlotName = "DefaultSlot";
         public static string CurrentRoomName = "DefaultRoom";
 
+        public static bool IsDyingFromDeathLink = false;
+
+        public static void SendDeathToPython()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    using (TcpClient client = new TcpClient("127.0.0.1", 38283))
+                    using (NetworkStream stream = client.GetStream())
+                    {
+                        byte[] data = Encoding.UTF8.GetBytes("DEATH");
+                        stream.Write(data, 0, data.Length);
+                    }
+                }
+                catch { }
+            });
+        }
+
+        public static void KillPlayerFromDeathLink()
+        {
+            if (Singleton<CharacterTracker>.Instance == null || Singleton<GameFlowManager>.Instance == null) return;
+
+            // Sécurité : on ne tue pas le joueur s'il est dans le menu principal
+            if (Singleton<GameFlowManager>.Instance.IsOnTitleScreen()) return;
+
+            FirstPersonMover player = Singleton<CharacterTracker>.Instance.GetPlayerRobot();
+
+            // On vérifie qu'il est en vie et qu'il n'est pas en train de subir une animation d'amélioration à l'autel
+            if (player != null && player.IsAlive())
+            {
+                Log.LogInfo("[DEATHLINK] Un allié est mort ! Destruction du robot...");
+                IsDyingFromDeathLink = true;
+                try
+                {
+                    // 1. Passe le booléen interne _isAlive (hérité de Character) à false
+                    AccessTools.Field(typeof(Character), "_isAlive")?.SetValue(player, false);
+
+                    // 2. Appelle la méthode protégée onDeath(Character killer, DamageSourceType damageSourceType, int attackID)
+                    var onDeathMethod = AccessTools.Method(typeof(FirstPersonMover), "onDeath");
+                    if (onDeathMethod != null)
+                    {
+                        onDeathMethod.Invoke(player, new object[] { null, DamageSourceType.None, -1 });
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    Log.LogError($"[DEATHLINK] Erreur lors de la destruction du joueur : {ex.Message}");
+                }
+                finally
+                {
+                    IsDyingFromDeathLink = false;
+                }
+            }
+        }
+
         public class ApItemDefinition
         {
             public List<UpgradeType> UpgradesToUnlock = new List<UpgradeType>();
@@ -57,7 +113,7 @@ namespace CloneDroneAP
             { "FireSword", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.FireSword } } },
             { "FireHammer", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.FireHammer } } },
             { "SpearUnlock", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.SpearUnlock } } },
-            { "FireSpear+ShieldBash", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.FireSpear, UpgradeType.ShieldBash } } },
+            { "FireSpear+ShieldBash", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.FireSpear, UpgradeType.ShieldBash, UpgradeType.ShieldSize, UpgradeType.EMPSpear, UpgradeType.UnbalanceOpponentSpear } } },
             { "FireBreath+FireResistance", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.FlameBreath, UpgradeType.FireResistance } } }
         };
 
@@ -93,7 +149,6 @@ namespace CloneDroneAP
                 tcpServer.Start();
                 listenerThread = new Thread(ListenForPythonItems) { IsBackground = true };
                 listenerThread.Start();
-                Log.LogInfo("[AP TCP] Listening on port 38282.");
             }
             catch (System.Exception ex)
             {
@@ -146,6 +201,10 @@ namespace CloneDroneAP
         {
             while (PendingItems.TryDequeue(out string message))
             {
+                if (message == "DEATHLINK")
+                {
+                    KillPlayerFromDeathLink();
+                }
                 if (message.StartsWith("SESSION:"))
                 {
                     string data = message.Substring(8);
@@ -517,6 +576,31 @@ namespace CloneDroneAP
         static bool Prefix()
         {
             return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(GameFlowManager), "onCharacterKilled")]
+    public class PlayerDeathLinkPatch
+    {
+        static void Postfix(Character character)
+        {
+            // 1. Si c'est déjà le DeathLink qui vient de nous tuer, on ne renvoie pas de signal (évite la boucle infinie)
+            if (Plugin.IsDyingFromDeathLink) return;
+
+            // 2. On vérifie que le personnage qui vient de mourir est bien le joueur principal (et pas un ennemi ou un allié IA)
+            if (character != null && character.IsMainPlayer() && !character.IsNeutral)
+            {
+                // Ignore la "mort" technique lorsque la station d'amélioration répare ou reconstruit le corps
+                if (Singleton<UpgradeManager>.Instance != null &&
+                    Singleton<UpgradeManager>.Instance.UpgradeStation != null &&
+                    Singleton<UpgradeManager>.Instance.UpgradeStation.IsRepairInProgress())
+                {
+                    return;
+                }
+
+                Plugin.Log.LogInfo("[DEATHLINK] Le joueur est mort ! Envoi du DeathLink à Archipelago...");
+                Plugin.SendDeathToPython();
+            }
         }
     }
 

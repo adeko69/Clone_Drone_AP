@@ -55,5 +55,6 @@ class CloneDroneWorld(World):
 
     def fill_slot_data(self) -> Dict[str, Any]:
         return {
-            "goal": int(self.options.goal.value)
+            "goal": int(self.options.goal.value),
+           "death_link": self.options.death_link.value
         }

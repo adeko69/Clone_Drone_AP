@@ -27,9 +27,19 @@ class CloneDroneContext(CommonContext):
         await self.get_username()
         await self.send_connect()
 
+    def on_deathlink(self, data: dict):
+        super().on_deathlink(data)
+        cause = data.get("cause", "deathlink")
+        
+        asyncio.create_task(send_raw_to_game("DEATHLINK\n"))
+
     def on_package(self, cmd: str, args: dict):
         if cmd == "Connected":
-            logger.info("Connecté au serveur Archipelago ! Récupération des infos...")
+            slot_data = args.get("slot_data", {})
+            
+            # Active le DeathLink si coché dans le YAML
+            if slot_data.get("death_link", False):
+                asyncio.create_task(self.update_death_link(True))
             
             # Nom du slot (ex: adekoDrone)
             slot_name = self.auth or "UnknownSlot"
@@ -72,6 +82,16 @@ async def send_session_info_to_game(slot: str, room: str, goal: str):
         ui.base_title = "Clone Drone Archipelago Client"
         return ui
 
+async def send_raw_to_game(message: str):
+    try:
+        reader, writer = await asyncio.open_connection('127.0.0.1', 38282)
+        writer.write(message.encode('utf-8'))
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+    except Exception as e:
+        logger.error(f"[TCP Client] Can't send raw: {e}")
+
 async def send_pending_items_to_game(ctx: CloneDroneContext):
     while ctx.items_sent_to_game < len(ctx.items_received):
         network_item = ctx.items_received[ctx.items_sent_to_game]
@@ -99,11 +119,14 @@ async def handle_game_check(reader, writer, ctx: CloneDroneContext):
         except Exception:
             pass
 
-    if message.isdigit():
+    if message == "DEATH":
+        if "DeathLink" in ctx.tags:
+            await ctx.send_death(f"{ctx.auth} deathlink!")
+
+    elif message.isdigit():
         check_offset = int(message)
         location_id = 72000 + check_offset
-        logger.info(f"Check reçu du jeu : ID {location_id}")
-        
+
         if ctx.server and ctx.slot:
             await ctx.check_locations([location_id])
 
@@ -111,7 +134,6 @@ async def handle_game_check(reader, writer, ctx: CloneDroneContext):
             ctx.finished_game = True
             if ctx.server and ctx.slot:
                 await ctx.send_msgs([{"cmd": "StatusUpdate", "status": ClientStatus.CLIENT_GOAL}])
-                logger.info("Victory")
 
 async def game_watcher(ctx: CloneDroneContext):
     try:

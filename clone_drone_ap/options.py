@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from Options import Choice, PerGameCommonOptions
+from Options import Choice, DeathLink, PerGameCommonOptions
 
 class CloneDroneGoal(Choice):
     """
@@ -17,3 +17,4 @@ class CloneDroneGoal(Choice):
 @dataclass
 class CloneDroneOptions(PerGameCommonOptions):
     goal: CloneDroneGoal
+    death_link: DeathLink
