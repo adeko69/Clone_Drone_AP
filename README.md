@@ -33,6 +33,8 @@ Launch Archipelago Launcher and find Clone Drone Client.
 > [!IMPORTANT]
 > Connect to the world, then enter your game slot, AND ONLY THEN launch `Clone Drone in the Danger Zone.exe`. Otherwise data wont be send. If you leave the game, your current progress in game (current endless level) is saved. BUT you'll need to disconnect to the world (using the disconnect button) and redo the last part to connect back
 
+## Remove patch
+To restore the normal game, just rename "./BepInEx" as "./.BepInEx/" (just put a point behind). Patcher wont work and game will be restored without the patch being active
 ## Edit of the Patch
 
 I allow player to edit, fork and modify this patch. I'm a sole java dev doing it as hobby and this project is in C# and python so there is maybe major issues lol. Try contacting me @adeko69 on discord to push update and review things
