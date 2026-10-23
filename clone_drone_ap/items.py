@@ -25,9 +25,9 @@ item_table: Dict[str, ItemData] = {
     "Armor+Repair": ItemData(BASE_ITEM_ID + 12, ItemClassification.useful),
     "Hammer": ItemData(BASE_ITEM_ID + 13, ItemClassification.progression),
     "FireSword": ItemData(BASE_ITEM_ID + 14, ItemClassification.useful),
-    "FireHammer": ItemData(BASE_ITEM_ID + 15, ItemClassification.useful),
+    "FireHammer+FireSpear": ItemData(BASE_ITEM_ID + 15, ItemClassification.useful),
     "SpearUnlock": ItemData(BASE_ITEM_ID + 16, ItemClassification.progression),
-    "FireSpear+ShieldBash": ItemData(BASE_ITEM_ID + 17, ItemClassification.useful),
+    "SpearShield+ShieldBash": ItemData(BASE_ITEM_ID + 17, ItemClassification.useful),
     "FireBreath+FireResistance": ItemData(BASE_ITEM_ID + 18, ItemClassification.useful),
     "NextUpgradeFree": ItemData(BASE_ITEM_ID + 19, ItemClassification.useful),
 }

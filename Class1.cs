@@ -111,9 +111,9 @@ namespace CloneDroneAP
             { "Armor+Repair", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.Armor, UpgradeType.Repair } } },
             { "Hammer", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.Hammer } } },
             { "FireSword", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.FireSword } } },
-            { "FireHammer", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.FireHammer } } },
+            { "FireHammer+FireSpear", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.FireHammer, UpgradeType.FireSpear } } },
             { "SpearUnlock", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.SpearUnlock } } },
-            { "FireSpear+ShieldBash", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.FireSpear, UpgradeType.ShieldBash, UpgradeType.ShieldSize, UpgradeType.EMPSpear, UpgradeType.UnbalanceOpponentSpear } } },
+            { "SpearShield+ShieldBash", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.ShieldBash, UpgradeType.ShieldSize, UpgradeType.EMPSpear, UpgradeType.UnbalanceOpponentSpear } } },
             { "FireBreath+FireResistance", new ApItemDefinition { UpgradesToUnlock = { UpgradeType.FlameBreath, UpgradeType.FireResistance } } }
         };
 
