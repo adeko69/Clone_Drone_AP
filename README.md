@@ -23,7 +23,7 @@ A Clone Drone in The Danger Zone Repository for Archipelago.
 ## Check if patch is on
 
 10. Launch `Clone Drone in the Danger Zone.exe`, if Steam appears it will unpatch, so patch wont work. Go back to step 2 and 4 and try again
-11. If "Steam Connect Failed" appear, look at "Play Multiplayer" button. If it is greyed out but without a "Can't connect to online services", it means the patch is on. Click on Browse Workshop, it shouldnt work. Well down, your game is patched.
+11. Look at "Play Multiplayer" button. If it is greyed out but without a "Can't connect to online services", it means the patch is on. Click on Browse Workshop, it shouldnt work. Well down, your game is patched.
 
 ## Joining a world
 
