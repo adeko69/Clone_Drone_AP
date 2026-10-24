@@ -79,7 +79,6 @@ namespace CloneDroneAP
             }
             catch (System.Exception ex)
             {
-                // NeedsNewRun reste à true : le HUD demandera un reset manuel
                 Log.LogError("[AP] Auto reset failed: " + ex.Message);
             }
             finally
@@ -179,7 +178,6 @@ namespace CloneDroneAP
             }
         }
 
-        // ------------------------------------------------------------------
 
         public static void SendDeathToPython()
         {
@@ -202,22 +200,18 @@ namespace CloneDroneAP
         {
             if (Singleton<CharacterTracker>.Instance == null || Singleton<GameFlowManager>.Instance == null) return;
 
-            // Sécurité : on ne tue pas le joueur s'il est dans le menu principal
             if (Singleton<GameFlowManager>.Instance.IsOnTitleScreen()) return;
 
             FirstPersonMover player = Singleton<CharacterTracker>.Instance.GetPlayerRobot();
 
-            // On vérifie qu'il est en vie et qu'il n'est pas en train de subir une animation d'amélioration à l'autel
             if (player != null && player.IsAlive())
             {
                 Log.LogInfo("[DEATHLINK] Un allié est mort ! Destruction du robot...");
                 IsDyingFromDeathLink = true;
                 try
                 {
-                    // 1. Passe le booléen interne _isAlive (hérité de Character) à false
                     AccessTools.Field(typeof(Character), "_isAlive")?.SetValue(player, false);
 
-                    // 2. Appelle la méthode protégée onDeath(Character killer, DamageSourceType damageSourceType, int attackID)
                     var onDeathMethod = AccessTools.Method(typeof(FirstPersonMover), "onDeath");
                     if (onDeathMethod != null)
                     {
@@ -346,7 +340,6 @@ namespace CloneDroneAP
                     using (NetworkStream stream = client.GetStream())
                     {
                         stream.ReadTimeout = 2000;
-                        // Le client Python ferme la connexion après l'envoi : on lit jusqu'à la fin
                         using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
                         {
                             string message = reader.ReadToEnd().Trim();
@@ -367,7 +360,6 @@ namespace CloneDroneAP
                 }
                 catch (System.Exception ex)
                 {
-                    // Une erreur sur une connexion ne doit pas tuer le listener
                     Log.LogWarning("[AP TCP] Listener error: " + ex.Message);
                     Thread.Sleep(200);
                 }
@@ -393,7 +385,6 @@ namespace CloneDroneAP
 
                 if (message.StartsWith("SESSION:"))
                 {
-                    // SESSION:slot|room|goal|scene
                     string data = message.Substring(8);
                     string[] parts = data.Split('|');
                     if (parts.Length >= 3)
@@ -412,7 +403,6 @@ namespace CloneDroneAP
 
                 if (message.StartsWith("SCENE:"))
                 {
-                    // Resynchronisation envoyée par le client (fait foi)
                     Scene = ParseScene(message.Substring(6));
                     Log.LogInfo($"[AP SCENE] Scene : {SceneToString()}");
                     UpdateHudDisplay();
@@ -504,7 +494,6 @@ namespace CloneDroneAP
             }
         }
 
-        // Envoie au client le NIVEAU gagné (ex: "7"). Le client décide de la location.
         public static void SendCheckToPython(int level)
         {
             ThreadPool.QueueUserWorkItem(_ =>
@@ -665,7 +654,6 @@ namespace CloneDroneAP
 
         private static IEnumerator SpawnAndMountRaptorRoutine(FirstPersonMover rider)
         {
-            // Attend 1 frame que le cavalier soit bien placé
             
             yield return null;
 
@@ -699,7 +687,6 @@ namespace CloneDroneAP
             FirstPersonMover mount = mountTransform.GetComponent<FirstPersonMover>();
             if (mount == null) yield break;
 
-            // Copie la section d'arène
             SectionMember riderSection = rider.GetComponent<SectionMember>();
             SectionMember mountSection = mount.GetComponent<SectionMember>();
             if (riderSection != null && mountSection != null)
@@ -707,13 +694,11 @@ namespace CloneDroneAP
                 mountSection.Sections = riderSection.Sections;
             }
 
-            // Bloque l'IA du Raptor pendant qu'il s'initialise si le cavalier dort encore
             if (!rider.IsAIEnabled())
             {
                 mount.DisableAI();
             }
 
-            // Attend que le Raptor ait initialisé son CharacterModel (RiderContainer)
             int timeout = 0;
             while (!mount.IsInitialized() && timeout < 30)
             {
@@ -726,7 +711,6 @@ namespace CloneDroneAP
             {
                 rider.StartRiding(mount);
 
-                // Synchronise immédiatement l'IA après le montage
                 if (rider.IsAIEnabled())
                     mount.EnableAI();
                 else
@@ -735,7 +719,6 @@ namespace CloneDroneAP
         }
     }
 
-    // Synchronise automatiquement l'IA de la monture sur celle de son cavalier à chaque frame
     [HarmonyPatch(typeof(FirstPersonMover), "Update")]
     public class SyncMountAIWithRiderPatch
     {
@@ -743,7 +726,6 @@ namespace CloneDroneAP
         {
             if (__instance == null || !__instance.IsAlive()) return;
 
-            // Si ce personnage monte une monture (et que ce n'est pas un joueur)
             if (__instance.IsRidingOtherCharacter() && !__instance.IsPlayer())
             {
                 FirstPersonMover mount = __instance.GetCharacterWeAreRiding();
@@ -752,12 +734,11 @@ namespace CloneDroneAP
                     bool riderAI = __instance.IsAIEnabled();
                     bool mountAI = mount.IsAIEnabled();
 
-                    // Si le cavalier a son IA activée mais que le Raptor dort, on réveille le Raptor !
                     if (riderAI && !mountAI)
                     {
                         mount.EnableAI();
                     }
-                    // Si le cavalier a son IA coupée (pendant l'intro de l'ascenseur) mais que le Raptor bouge, on coupe le Raptor !
+
                     else if (!riderAI && mountAI)
                     {
                         mount.DisableAI();
@@ -813,7 +794,7 @@ namespace CloneDroneAP
     {
         static bool Prefix()
         {
-            return false; // l'original ne s'exécute pas, la fenêtre n'apparaît jamais
+            return false;
         }
     }
 
@@ -863,12 +844,11 @@ namespace CloneDroneAP
     {
         static bool Prefix(ref bool __result)
         {
-            __result = false; // N'est jamais verrouillé par un challenge
-            return false;     // Ignore la méthode originale
+            __result = false;
+            return false;
         }
     }
 
-    // Scénario INFERNO : les ennemis spawnent avec des armes de feu
     [HarmonyPatch(typeof(FirstPersonMover), "RefreshUpgrades")]
     public class EnemyFireVariantPatch
     {
@@ -969,7 +949,6 @@ namespace CloneDroneAP
         {
             if (__instance != null)
             {
-                // Vérifie si c'est un ennemi (pas dans l'équipe du joueur et pas neutre/allié)
                 if (!__instance.IsPlayerTeam && !__instance.IsNeutral)
                 {
                     string killerName = (killer != null) ? killer.CharacterType.ToString() : "Inconnu";
@@ -1003,18 +982,14 @@ namespace CloneDroneAP
 
                 float chanceSprinter2 = Mathf.Floor(endLevel / 3f) * 1f;
 
-                // +2% pour SprinterBowman tous les 5 niveaux
                 float chanceSprinterBowman = Mathf.Floor(endLevel / 5f) * 2f;
 
-                // Le reste est attribué à Sprinter1 (total = 100%)
                 float chanceSprinter1 = Mathf.Max(0f, 100f - (chanceSprinter2 + chanceSprinterBowman));
 
-                // Tirage aléatoire entre 0 et 100
                 float randomRoll = UnityEngine.Random.Range(0f, 100f);
 
                 targetType = EnemyType.Sprinter1;
 
-                // Détermination du type d'ennemi selon les seuils cumulés
                 if (randomRoll < chanceSprinterBowman)
                 {
                     targetType = EnemyType.SprinterBowman;
@@ -1079,13 +1054,10 @@ namespace CloneDroneAP
     {
         static void Postfix(Character character)
         {
-            // 1. Si c'est déjà le DeathLink qui vient de nous tuer, on ne renvoie pas de signal (évite la boucle infinie)
             if (Plugin.IsDyingFromDeathLink) return;
 
-            // 2. On vérifie que le personnage qui vient de mourir est bien le joueur principal (et pas un ennemi ou un allié IA)
             if (character != null && character.IsMainPlayer() && !character.IsNeutral)
             {
-                // Ignore la "mort" technique lorsque la station d'amélioration répare ou reconstruit le corps
                 if (Singleton<UpgradeManager>.Instance != null &&
                     Singleton<UpgradeManager>.Instance.UpgradeStation != null &&
                     Singleton<UpgradeManager>.Instance.UpgradeStation.IsRepairInProgress())
