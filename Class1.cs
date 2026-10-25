@@ -448,6 +448,8 @@ namespace CloneDroneAP
         // Appelé au début d'un step qui démarre sans l'épée
         public static void StripStartingSword(FirstPersonMover player, object collection)
         {
+            if (player == null) return;
+
             long key = (long)player.GetInstanceID() * 10L + FinishedRedos;
             bool first = key != _stripKey;
             _stripKey = key;
@@ -461,7 +463,13 @@ namespace CloneDroneAP
                 {
                     try
                     {
-                        GameDataManager.Instance.SetUpgradeLevel(type, 0);
+                        // 1. Supprime complètement la clé du dictionnaire GameData (au lieu de mettre 0)
+                        Dictionary<UpgradeType, int> playerUpgrades = GameDataManager.Instance.GetPlayerUpgradeDictionary();
+                        if (playerUpgrades != null && playerUpgrades.ContainsKey(type))
+                        {
+                            playerUpgrades.Remove(type);
+                            GameDataManager.Instance.SetDirty();
+                        }
                         cleared = true;
                     }
                     catch (System.Exception ex)
@@ -471,6 +479,30 @@ namespace CloneDroneAP
                 }
 
                 if (first) Log.LogInfo($"[AP] Sword strip {type}: collection={removed} gameData={cleared}");
+            }
+
+            // 2. Accède à la liste privée _equippedWeapons de CE joueur via Harmony AccessTools
+            List<WeaponType> equippedWeapons = AccessTools.Field(typeof(FirstPersonMover), "_equippedWeapons")?.GetValue(player) as List<WeaponType>;
+            if (equippedWeapons != null && equippedWeapons.Contains(WeaponType.Sword))
+            {
+                equippedWeapons.Remove(WeaponType.Sword);
+                Log.LogInfo("[AP] WeaponType.Sword retiré de _equippedWeapons !");
+            }
+
+            // 3. Si le joueur tenait déjà l'épée dans ses mains, on change d'arme (ou on déséquipe)
+            if (player.GetEquippedWeaponType() == WeaponType.Sword)
+            {
+                if (equippedWeapons != null && equippedWeapons.Count > 0)
+                {
+                    // Équipe la première autre arme disponible (ex: Hammer, Bow, Spear)
+                    player.SetEquippedWeaponType(equippedWeapons[0], checkForWeaponAttackCooldown: false);
+                }
+                else
+                {
+                    // S'il n'a aucune autre arme, on lui vide les mains et on cache le modèle 3D
+                    player.SetEquippedWeaponType(WeaponType.None, checkForWeaponAttackCooldown: false);
+                    player.GetCharacterModel()?.SetAllWeaponModelsInactive();
+                }
             }
         }
 
