@@ -3,38 +3,44 @@ import random
 import Utils
 from CommonClient import CommonContext, server_loop, gui_enabled, ClientCommandProcessor, logger, get_base_parser
 from NetUtils import ClientStatus
+from .upgrade_data import upgrade_location_id, win_step_location_id
+from .scenarios import (
+    generate_scene,
+    SCENARIO_NORMAL, SCENARIO_INFERNO, SCENARIO_SPRINTER,
+    SCENARIO_RAPTOR, SCENARIO_RANDOM, SCENARIO_ARMOR,
+)
 
 # --- Constantes (doivent rester synchronisées avec locations.py) ---
 BASE_LOCATION_ID = 72000
 STRIDE = 40
-GOAL_LEVELS = {1: 15, 2: 23, 3: 33, 4: 4}   
+GOAL_LEVELS = {1: 15, 2: 23, 3: 33, 4: 4}
 GOAL_NAMES = {1: "titanium", 2: "uranium", 3: "insanium", 4: "silver"}
-
-SCENARIO_NORMAL, SCENARIO_INFERNO, SCENARIO_SPRINTER, SCENARIO_RAPTOR, SCENARIO_RANDOM, SCENARIO_ARMOR  = 0, 1, 2, 3, 4, 5
-
 
 
 class Scene:
-    def __init__(self, values):
+    """Une entrée par step : X = scénario (-1 = step terminé), Y = arme de départ (0 à 3).
+    Format texte : "X:Y;X:Y;..." (l'ancien format "X;X;..." est accepté, Y vaut alors 0)."""
+
+    def __init__(self, values, weapons=None):
         self.values = values
+        if weapons is None or len(weapons) != len(values):
+            weapons = [0] * len(values)
+        self.weapons = weapons
 
     @classmethod
     def parse(cls, s: str):
-        return cls([int(x) for x in s.split(";") if x != ""])
-
-    @classmethod
-    def generate(cls, redo: int, scenarios: list, rng: random.Random):
-         pool = list(dict.fromkeys(scenarios))   # enlève d'éventuels doublons, garde l'ordre
-         values = []
-         bag = []
-         while len(values) < redo:
-             if not bag:
-                 bag = list(pool)                # sac vide : on le remplit à nouveau
-             values.append(bag.pop(rng.randrange(len(bag))))
-         return cls(values)
+        values, weapons = [], []
+        for part in s.split(";"):
+            part = part.strip()
+            if not part:
+                continue
+            x, _, y = part.partition(":")
+            values.append(int(x))
+            weapons.append(int(y) if y.strip() else 0)
+        return cls(values, weapons)
 
     def __str__(self):
-        return ";".join(map(str, self.values))
+        return ";".join(f"{x}:{y}" for x, y in zip(self.values, self.weapons))
 
     @property
     def finished(self) -> int:
@@ -52,18 +58,23 @@ class Scene:
 
 
 def resolve_check(scene: Scene, goal_n: int, level: int):
-    """Retourne (location_id ou None, victoire, scene_modifiée)."""
+    """Retourne (liste d'IDs de locations, victoire, scene_modifiée).
+
+    Finir un step qui n'est pas le dernier valide deux checks : le niveau final du step
+    et "Win Step X". Finir le dernier step = victoire (pas de location)."""
     if scene is None or scene.complete or level < 1:
-        return None, False, False
+        return [], False, False
     if level > goal_n:                       # dépassement : on ne casse rien
-        return None, False, False
+        return [], False, False
     finished = scene.finished
     is_last_redo = finished == len(scene.values) - 1
-    if level == goal_n:                      # fin du redo
+    ids = [BASE_LOCATION_ID + finished * STRIDE + level]
+    if level == goal_n:                      # fin du step
         scene.mark_done()
         if is_last_redo:
-            return None, True, True          # check ultime = victoire
-    return BASE_LOCATION_ID + finished * STRIDE + level, False, level == goal_n
+            return [], True, True            # check ultime = victoire
+        ids.append(win_step_location_id(finished + 1))
+    return ids, False, level == goal_n
 
 
 class CloneDroneCommandProcessor(ClientCommandProcessor):
@@ -83,6 +94,7 @@ class CloneDroneContext(CommonContext):
         super().__init__(server_address, password)
         self.items_sent_to_game = 0
         self.scene = None
+        self.session_info = None   # (slot, room, goal) une fois connecté à Archipelago
         self.goal_n = GOAL_LEVELS[2]
 
         # Démarre le serveur TCP local immédiatement pour écouter le jeu, même hors connexion
@@ -111,14 +123,13 @@ class CloneDroneContext(CommonContext):
             self.goal_n = GOAL_LEVELS.get(goal_value, 23)
 
             slot_name = self.auth or "UnknownSlot"
-            room_name = getattr(self, "server_seed_name", None) or "DefaultRoom"
+            room_name = getattr(self, "seed_name", None) or "DefaultRoom"
 
-            
             scene_str = slot_data.get("scene")
             if scene_str:
                 self.scene = Scene.parse(scene_str)          # source de vérité : la seed
             else:
-    # Anciennes seeds sans "scene" : repli sur l'ancien tirage
+                # Anciennes seeds sans "scene" : repli sur un tirage déterministe
                 scenarios = []
                 if slot_data.get("normal", 0):   scenarios.append(SCENARIO_NORMAL)
                 if slot_data.get("inferno", 0):  scenarios.append(SCENARIO_INFERNO)
@@ -131,13 +142,15 @@ class CloneDroneContext(CommonContext):
                 rng = random.Random(f"{getattr(self, 'seed_name', '') or ''}:{self.slot}")
                 self.scene = Scene(generate_scene(scenarios, redo, rng))
 
-
+            # Progression restaurée depuis le serveur :
+            # le check du niveau goal_n d'un redo = redo fini
             checked = set(args.get("checked_locations", []))
             for r in range(redo - 1):
                 if BASE_LOCATION_ID + r * STRIDE + self.goal_n in checked:
                     self.scene.mark_done()
 
             goal_str = GOAL_NAMES.get(goal_value, "uranium")
+            self.session_info = (slot_name, room_name, goal_str)
             asyncio.create_task(
                 send_session_info_to_game(slot_name, room_name, goal_str, str(self.scene))
             )
@@ -211,13 +224,36 @@ async def handle_game_check(reader, writer, ctx: CloneDroneContext):
         if "DeathLink" in ctx.tags:
             await ctx.send_death(f"{ctx.auth} deathlink!")
 
+    elif message in ("PING", "SYNC"):
+        # Boutons du menu principal du jeu : "y a-t-il une session Archipelago ?"
+        connected = bool(ctx.server and ctx.slot and ctx.scene is not None and ctx.session_info)
+        if not connected:
+            await send_raw_to_game("NOSESSION\n")
+        elif message == "SYNC":
+            # Le jeu n'a pas encore la session (démarré après le client) : on la renvoie avec les items
+            slot, room, goal = ctx.session_info
+            ctx.items_sent_to_game = 0
+            await send_session_info_to_game(slot, room, goal, str(ctx.scene))
+        else:
+            await send_raw_to_game("PONG\n")
+
+    elif message.startswith("BUY:"):
+        # Achat d'une upgrade dans la boutique : "BUY:<UpgradeType>:<niveau>". Le check est relatif au step en cours.
+        parts = message.split(":")
+        if len(parts) == 3 and parts[2].isdigit() and ctx.scene is not None and not ctx.scene.complete:
+            step = ctx.scene.finished + 1
+            loc_id = upgrade_location_id(step, parts[1], int(parts[2]))
+            if loc_id and ctx.server and ctx.slot and loc_id in ctx.server_locations:
+                await ctx.check_locations([loc_id])
+
     elif message.isdigit():
         # Le mod envoie juste le niveau gagné
         level = int(message)
-        loc_id, victory, changed = resolve_check(ctx.scene, ctx.goal_n, level)
+        loc_ids, victory, changed = resolve_check(ctx.scene, ctx.goal_n, level)
 
-        if loc_id and ctx.server and ctx.slot and loc_id in ctx.server_locations:
-            await ctx.check_locations([loc_id])
+        to_check = [i for i in loc_ids if i in ctx.server_locations]
+        if to_check and ctx.server and ctx.slot:
+            await ctx.check_locations(to_check)
 
         if victory and not ctx.finished_game:
             ctx.finished_game = True
