@@ -59,7 +59,7 @@ namespace CloneDroneAP
         public const int WeaponSpear = 3;
         public static bool NeedsNewRun = false;
         public static Plugin Instance;
-        public static bool AutoResetOnRedoComplete = true;
+        public static bool AutoResetOnStepComplete = true;
         public static float ResetDelaySeconds = 4f;
         private static bool _resetScheduled = false;
 
@@ -70,15 +70,15 @@ namespace CloneDroneAP
             return flow != null && !flow.IsOnTitleScreen();
         }
 
-        public static void ScheduleRedoReset()
+        public static void ScheduleStepReset()
         {
-            if (!AutoResetOnRedoComplete || _resetScheduled || Instance == null) return;
+            if (!AutoResetOnStepComplete || _resetScheduled || Instance == null) return;
             if (Scene.Count == 0 || SceneComplete) return;
             _resetScheduled = true;
-            Instance.StartCoroutine(RedoResetRoutine());
+            Instance.StartCoroutine(StepResetRoutine());
         }
 
-        private static IEnumerator RedoResetRoutine()
+        private static IEnumerator StepResetRoutine()
         {
             yield return new WaitForSeconds(ResetDelaySeconds);
             try
@@ -149,7 +149,7 @@ namespace CloneDroneAP
             return sb.ToString();
         }
 
-        public static int FinishedRedos
+        public static int FinishedSteps
         {
             get
             {
@@ -161,7 +161,7 @@ namespace CloneDroneAP
 
         public static bool SceneComplete
         {
-            get { return Scene.Count > 0 && FinishedRedos >= Scene.Count; }
+            get { return Scene.Count > 0 && FinishedSteps >= Scene.Count; }
         }
 
         public static int CurrentScenario
@@ -210,7 +210,7 @@ namespace CloneDroneAP
             get
             {
                 if (Scene.Count == 0) return 0;
-                return SceneComplete ? Scene.Count : FinishedRedos + 1;
+                return SceneComplete ? Scene.Count : FinishedSteps + 1;
             }
         }
 
@@ -448,9 +448,7 @@ namespace CloneDroneAP
         // Appelé au début d'un step qui démarre sans l'épée
         public static void StripStartingSword(FirstPersonMover player, object collection)
         {
-            if (player == null) return;
-
-            long key = (long)player.GetInstanceID() * 10L + FinishedRedos;
+            long key = (long)player.GetInstanceID() * 10L + FinishedSteps;
             bool first = key != _stripKey;
             _stripKey = key;
 
@@ -463,13 +461,7 @@ namespace CloneDroneAP
                 {
                     try
                     {
-                        // 1. Supprime complètement la clé du dictionnaire GameData (au lieu de mettre 0)
-                        Dictionary<UpgradeType, int> playerUpgrades = GameDataManager.Instance.GetPlayerUpgradeDictionary();
-                        if (playerUpgrades != null && playerUpgrades.ContainsKey(type))
-                        {
-                            playerUpgrades.Remove(type);
-                            GameDataManager.Instance.SetDirty();
-                        }
+                        GameDataManager.Instance.SetUpgradeLevel(type, 0);
                         cleared = true;
                     }
                     catch (System.Exception ex)
@@ -479,30 +471,6 @@ namespace CloneDroneAP
                 }
 
                 if (first) Log.LogInfo($"[AP] Sword strip {type}: collection={removed} gameData={cleared}");
-            }
-
-            // 2. Accède à la liste privée _equippedWeapons de CE joueur via Harmony AccessTools
-            List<WeaponType> equippedWeapons = AccessTools.Field(typeof(FirstPersonMover), "_equippedWeapons")?.GetValue(player) as List<WeaponType>;
-            if (equippedWeapons != null && equippedWeapons.Contains(WeaponType.Sword))
-            {
-                equippedWeapons.Remove(WeaponType.Sword);
-                Log.LogInfo("[AP] WeaponType.Sword retiré de _equippedWeapons !");
-            }
-
-            // 3. Si le joueur tenait déjà l'épée dans ses mains, on change d'arme (ou on déséquipe)
-            if (player.GetEquippedWeaponType() == WeaponType.Sword)
-            {
-                if (equippedWeapons != null && equippedWeapons.Count > 0)
-                {
-                    // Équipe la première autre arme disponible (ex: Hammer, Bow, Spear)
-                    player.SetEquippedWeaponType(equippedWeapons[0], checkForWeaponAttackCooldown: false);
-                }
-                else
-                {
-                    // S'il n'a aucune autre arme, on lui vide les mains et on cache le modèle 3D
-                    player.SetEquippedWeaponType(WeaponType.None, checkForWeaponAttackCooldown: false);
-                    player.GetCharacterModel()?.SetAllWeaponModelsInactive();
-                }
             }
         }
 
@@ -595,7 +563,7 @@ namespace CloneDroneAP
             return false;
         }
 
-        public static bool MarkCurrentRedoDone()
+        public static bool MarkCurrentStepDone()
         {
             for (int i = 0; i < Scene.Count; i++)
             {
@@ -935,7 +903,7 @@ namespace CloneDroneAP
                 else
                 {
                     string weaponInfo = CurrentWeapon != WeaponSword ? $" | Start: {WeaponName(CurrentWeapon)}" : "";
-                    sb.AppendLine($"Step {FinishedRedos + 1}/{Scene.Count} - {ScenarioName(CurrentScenario)}{weaponInfo}");
+                    sb.AppendLine($"Step {FinishedSteps + 1}/{Scene.Count} - {ScenarioName(CurrentScenario)}{weaponInfo}");
                     if (NeedsNewRun)
                     {
                         sb.AppendLine("Run finished: start a NEW game");
@@ -1310,17 +1278,17 @@ namespace CloneDroneAP
                 if (totalLevelsWon > goalLevel)
                 {
                     Plugin.NeedsNewRun = true;
-                    Plugin.ScheduleRedoReset();
+                    Plugin.ScheduleStepReset();
                 }
                 else if (totalLevelsWon == goalLevel)
                 {
                     if (Plugin.Scene.Count > 0 && !Plugin.SceneComplete)
                     {
-                        Plugin.MarkCurrentRedoDone();
-                        Plugin.Log.LogInfo($"[AP] Redo finished. Scene : {Plugin.SceneToString()}");
+                        Plugin.MarkCurrentStepDone();
+                        Plugin.Log.LogInfo($"[AP] Step finished. Scene : {Plugin.SceneToString()}");
                     }
                     Plugin.NeedsNewRun = true;
-                    Plugin.ScheduleRedoReset();
+                    Plugin.ScheduleStepReset();
                 }
                 else
                 {
@@ -1746,6 +1714,8 @@ namespace CloneDroneAP
             UpgradeCollection upgrades = AccessTools.Field(typeof(FirstPersonMover), "_upgradeCollection")?.GetValue(__instance) as UpgradeCollection;
             if (upgrades == null) return;
 
+            // Le step démarre avec une autre arme : on retire l'épée de base (et son amélioration) du loadout de départ.
+            // Seulement pendant la première seconde : une épée achetée ensuite (item SwordUnlock) reste.
             if (__instance.GetTimeSinceCreation() < 1f)
             {
                 Plugin.StripStartingSword(__instance, upgrades);
@@ -1761,7 +1731,7 @@ namespace CloneDroneAP
             if (__instance.GetTimeSinceCreation() >= 1f) return;
 
             // Une seule tentative par joueur et par step (RefreshUpgrades est appelé plusieurs fois)
-            long key = (long)__instance.GetInstanceID() * 10L + Plugin.FinishedRedos;
+            long key = (long)__instance.GetInstanceID() * 10L + Plugin.FinishedSteps;
             if (key == _equippedKey) return;
             _equippedKey = key;
 

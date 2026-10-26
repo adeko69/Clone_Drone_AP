@@ -16,11 +16,11 @@ class CloneDroneGoal(Choice):
     option_silver = 4
     default = 2
 
-class Redo(Range):
+class Steps(Range):
     """
-    REDO
+    Number of steps. A step is a full run to the goal: you have to win every step to complete the game.
     """
-    display_name = "Number of Redo"
+    display_name = "Number of Steps"
     range_start = 1
     range_end = 5
     default = 1
@@ -49,7 +49,9 @@ class RandomizeStartingWeapon(Choice):
     - Same Per Step: one weapon is drawn once and used for every step.
       It is given as a starting item, and removed from the item pool.
     - Random By Step: every step gets its own weapon (the weapons vary from step to step).
-    Unless you start with the sword, the Sword becomes an item to find.
+    Unless you start with the sword, the Sword becomes an item to find, and you start the step without it.
+    The unlock of the weapon you start with is always given as a starting item
+    (with a Global upgrade mode and Random By Step, only for the first step).
     """
     display_name = "Randomize Starting Weapon"
     option_none = 0
@@ -87,8 +89,8 @@ class TotallyRandom(Toggle):
     default = 0
 
 class Armor(Toggle):
-    """Every enemy spawns with their personal Armor Bot"""
-    display_name = "Armor Bot Invasion"
+    """Donne de l'armure"""
+    display_name = "Armored"
     default = 0
 
 
@@ -96,7 +98,7 @@ class Armor(Toggle):
 class CloneDroneOptions(PerGameCommonOptions):
     goal: CloneDroneGoal
     death_link: DeathLink
-    redo: Redo
+    steps: Steps
     upgrade_mode: UpgradeMode
     randomize_starting_weapon: RandomizeStartingWeapon
     normal: Normal

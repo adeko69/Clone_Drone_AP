@@ -32,12 +32,12 @@ def _draw_bag(pool: list, count: int, rng) -> list:
     return values
 
 
-def generate_scene(scenarios: list, redo: int, rng) -> list:
+def generate_scene(scenarios: list, step_count: int, rng) -> list:
     """Retourne la liste des X (un scénario par step)."""
-    return _draw_bag(scenarios, redo, rng)
+    return _draw_bag(scenarios, step_count, rng)
 
 
-def generate_weapons(mode: int, redo: int, rng) -> list:
+def generate_weapons(mode: int, step_count: int, rng) -> list:
     """Retourne la liste des Y (une arme de départ par step).
 
     - NONE   : toujours l'épée (0), rien à randomiser
@@ -45,10 +45,10 @@ def generate_weapons(mode: int, redo: int, rng) -> list:
     - RANDOM : tirage 'sac' sur les 4 armes, donc jamais le même chiffre à chaque step
     """
     if mode == WEAPON_MODE_SAME:
-        return [rng.randrange(WEAPON_COUNT)] * redo
+        return [rng.randrange(WEAPON_COUNT)] * step_count
     if mode == WEAPON_MODE_RANDOM:
-        return _draw_bag(list(range(WEAPON_COUNT)), redo, rng)
-    return [WEAPON_SWORD] * redo
+        return _draw_bag(list(range(WEAPON_COUNT)), step_count, rng)
+    return [WEAPON_SWORD] * step_count
 
 
 def format_scene(scenarios: list, weapons: list) -> str:

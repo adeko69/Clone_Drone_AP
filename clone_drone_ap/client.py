@@ -3,7 +3,7 @@ import random
 import Utils
 from CommonClient import CommonContext, server_loop, gui_enabled, ClientCommandProcessor, logger, get_base_parser
 from NetUtils import ClientStatus
-from .upgrade_data import upgrade_location_id, win_step_location_id
+from .upgrade_data import upgrade_location_id, win_step_location_id, upgrade_checks_for_step
 from .scenarios import (
     generate_scene,
     SCENARIO_NORMAL, SCENARIO_INFERNO, SCENARIO_SPRINTER,
@@ -15,6 +15,17 @@ BASE_LOCATION_ID = 72000
 STRIDE = 40
 GOAL_LEVELS = {1: 15, 2: 23, 3: 33, 4: 4}
 GOAL_NAMES = {1: "titanium", 2: "uranium", 3: "insanium", 4: "silver"}
+
+# Les checks d'achat sont relatifs au step : une fois le step fini, ceux qui n'ont pas été faits ne peuvent plus l'être.
+# True = finir un step valide aussi tous ses checks d'achat restants, pour que les items qu'ils contiennent
+# ne restent pas bloqués jusqu'à la fin (les upgrades "(Step N)" peuvent se trouver dans les steps 1 à N).
+RELEASE_STEP_CHECKS_ON_WIN = True
+
+
+def purchase_checks_of_step(step: int) -> list:
+    if not RELEASE_STEP_CHECKS_ON_WIN:
+        return []
+    return [code for _name, code, _upgrade in upgrade_checks_for_step(step)]
 
 
 class Scene:
@@ -60,20 +71,21 @@ class Scene:
 def resolve_check(scene: Scene, goal_n: int, level: int):
     """Retourne (liste d'IDs de locations, victoire, scene_modifiée).
 
-    Finir un step qui n'est pas le dernier valide deux checks : le niveau final du step
-    et "Win Step X". Finir le dernier step = victoire (pas de location)."""
+    Finir un step qui n'est pas le dernier valide le niveau final du step, "Win Step X" et (si activé)
+    tous les checks d'achat restants du step. Finir le dernier step = victoire."""
     if scene is None or scene.complete or level < 1:
         return [], False, False
     if level > goal_n:                       # dépassement : on ne casse rien
         return [], False, False
     finished = scene.finished
-    is_last_redo = finished == len(scene.values) - 1
+    is_last_step = finished == len(scene.values) - 1
     ids = [BASE_LOCATION_ID + finished * STRIDE + level]
     if level == goal_n:                      # fin du step
         scene.mark_done()
-        if is_last_redo:
-            return [], True, True            # check ultime = victoire
+        if is_last_step:
+            return purchase_checks_of_step(finished + 1), True, True   # check ultime = victoire
         ids.append(win_step_location_id(finished + 1))
+        ids.extend(purchase_checks_of_step(finished + 1))
     return ids, False, level == goal_n
 
 
@@ -118,7 +130,7 @@ class CloneDroneContext(CommonContext):
             if slot_data.get("death_link", False):
                 asyncio.create_task(self.update_death_link(True))
 
-            redo = slot_data.get("redo", 1)
+            step_count = slot_data.get("steps", 1)
             goal_value = slot_data.get("goal", 2)
             self.goal_n = GOAL_LEVELS.get(goal_value, 23)
 
@@ -140,12 +152,12 @@ class CloneDroneContext(CommonContext):
                 if not scenarios:
                     scenarios = [SCENARIO_NORMAL]
                 rng = random.Random(f"{getattr(self, 'seed_name', '') or ''}:{self.slot}")
-                self.scene = Scene(generate_scene(scenarios, redo, rng))
+                self.scene = Scene(generate_scene(scenarios, step_count, rng))
 
             # Progression restaurée depuis le serveur :
-            # le check du niveau goal_n d'un redo = redo fini
+            # le check du niveau goal_n d'un step = step fini
             checked = set(args.get("checked_locations", []))
-            for r in range(redo - 1):
+            for r in range(step_count - 1):
                 if BASE_LOCATION_ID + r * STRIDE + self.goal_n in checked:
                     self.scene.mark_done()
 

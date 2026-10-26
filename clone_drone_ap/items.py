@@ -66,7 +66,7 @@ SPLIT_PARTS = {name for parts in SPLIT_ITEMS.values() for name, _ in parts}
 UPGRADE_GLOBAL_GROUPED, UPGRADE_GLOBAL_UNGROUPED = 0, 1
 UPGRADE_PER_STEP_GROUPED, UPGRADE_PER_STEP_UNGROUPED = 2, 3
 
-MAX_STEPS = 5   # doit rester égal à MAX_REDO dans locations.py
+MAX_STEPS = 5   # doit rester égal à MAX_STEPS dans locations.py
 
 # Tous les items qui débloquent une upgrade côté jeu (tout sauf l'économie : ShopDiscount / NextUpgradeFree)
 UPGRADE_ITEMS = [n for n in item_table

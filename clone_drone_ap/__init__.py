@@ -66,8 +66,8 @@ class CloneDroneWorld(World):
         if o.random.value:   scenarios.append(SCENARIO_RANDOM)
         if o.armor.value:    scenarios.append(SCENARIO_ARMOR)
 
-        scenario_values = generate_scene(scenarios, o.redo.value, self.random)
-        self.weapons = generate_weapons(int(o.randomize_starting_weapon.value), o.redo.value, self.random)
+        scenario_values = generate_scene(scenarios, o.steps.value, self.random)
+        self.weapons = generate_weapons(int(o.randomize_starting_weapon.value), o.steps.value, self.random)
         self.scene = format_scene(scenario_values, self.weapons)   # "X:Y;X:Y;..."
 
     def create_item(self, name: str) -> CloneDroneItem:
@@ -122,7 +122,7 @@ class CloneDroneWorld(World):
         ungroup = mode in (UPGRADE_GLOBAL_UNGROUPED, UPGRADE_PER_STEP_UNGROUPED)
         per_step = mode in (UPGRADE_PER_STEP_GROUPED, UPGRADE_PER_STEP_UNGROUPED)
         weapon_mode = int(self.options.randomize_starting_weapon.value)
-        redo = int(self.options.redo.value)
+        step_count = int(self.options.steps.value)
 
         def start_item(step: int) -> str:
             base = WEAPON_ITEMS[self.weapons[step - 1]]
@@ -134,10 +134,10 @@ class CloneDroneWorld(World):
         precollected = []
         win_locks = []
         if weapon_mode == WEAPON_MODE_SAME:
-            precollected = [start_item(k) for k in (range(1, redo + 1) if per_step else [1])]
+            precollected = [start_item(k) for k in (range(1, step_count + 1) if per_step else [1])]
         elif weapon_mode == WEAPON_MODE_RANDOM:
             precollected = [start_item(1)]
-            win_locks = [(win_step_name(k), start_item(k + 1)) for k in range(1, redo)]
+            win_locks = [(win_step_name(k), start_item(k + 1)) for k in range(1, step_count)]
 
         for name in precollected:
             self.multiworld.push_precollected(self.create_item(name))
@@ -202,12 +202,12 @@ class CloneDroneWorld(World):
     # ------------------------------------------------------------------
     def _create_per_step_items(self, total_locations: int, ungroup: bool, consumed: list, locked: set) -> None:
         goal = int(self.options.goal.value)
-        redo = int(self.options.redo.value)
+        step_count = int(self.options.steps.value)
         weapon_mode = int(self.options.randomize_starting_weapon.value)
 
         # Locations libres de chaque step (les "Win Step" verrouillés sont déjà pris)
-        step_locs = {k: [] for k in range(1, redo + 1)}
-        for name in get_active_location_names(goal, redo):
+        step_locs = {k: [] for k in range(1, step_count + 1)}
+        for name in get_active_location_names(goal, step_count):
             if name not in locked:
                 step_locs[LOCATION_STEP[name]].append(name)
 
@@ -220,7 +220,7 @@ class CloneDroneWorld(World):
                 base_names.extend([n] * ITEM_COPIES.get(n, 1))
 
         candidates = {}
-        for k in range(1, redo + 1):
+        for k in range(1, step_count + 1):
             names = list(base_names)
             if weapon_mode != WEAPON_MODE_NONE and self.weapons[k - 1] != WEAPON_SWORD:
                 names.append("SwordUnlock")   # item à trouver pour les steps qui démarrent sans l'épée
@@ -261,7 +261,7 @@ class CloneDroneWorld(World):
             "goal": int(self.options.goal.value),
             "death_link": self.options.death_link.value,
             "scene": self.scene,
-            "redo": int(self.options.redo.value),
+            "steps": int(self.options.steps.value),
             "upgrade_mode": int(self.options.upgrade_mode.value),
             "randomize_starting_weapon": int(self.options.randomize_starting_weapon.value),
             "normal": int(self.options.normal.value),

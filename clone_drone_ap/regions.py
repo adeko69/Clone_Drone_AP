@@ -7,10 +7,10 @@ def create_regions(world):
     arena_region = Region("Arena", world.player, world.multiworld)
 
     goal_val = world.options.goal.value
-    redo_val = world.options.redo.value
+    step_val = world.options.steps.value
 
-    # Locations dynamiques selon le goal et le redo
-    for location_name in get_active_location_names(goal_val, redo_val):
+    # Locations dynamiques selon le goal et le nombre de steps
+    for location_name in get_active_location_names(goal_val, step_val):
         location = CloneDroneLocation(
             world.player,
             location_name,
