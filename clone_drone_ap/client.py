@@ -21,6 +21,9 @@ GOAL_NAMES = {1: "titanium", 2: "uranium", 3: "insanium", 4: "silver"}
 # ne restent pas bloqués jusqu'à la fin (les upgrades "(Step N)" peuvent se trouver dans les steps 1 à N).
 RELEASE_STEP_CHECKS_ON_WIN = True
 
+KEY_NEXTFREE = "NextUpgradeFreeUsed"
+KEY_INFINITE_ARMOR = "InfiniteArmorUsed"
+
 
 def purchase_checks_of_step(step: int) -> list:
     if not RELEASE_STEP_CHECKS_ON_WIN:
@@ -108,6 +111,7 @@ class CloneDroneContext(CommonContext):
         self.scene = None
         self.session_info = None   # (slot, room, goal) une fois connecté à Archipelago
         self.goal_n = GOAL_LEVELS[2]
+        self.used = {KEY_NEXTFREE: 0, "StartWithArmorUsed": 0, KEY_INFINITE_ARMOR: 0}
 
         # Démarre le serveur TCP local immédiatement pour écouter le jeu, même hors connexion
         self.game_sync_task = asyncio.create_task(game_watcher(self), name="CloneDroneSync")
@@ -164,13 +168,41 @@ class CloneDroneContext(CommonContext):
             goal_str = GOAL_NAMES.get(goal_value, "uranium")
             self.session_info = (slot_name, room_name, goal_str)
             asyncio.create_task(
-                send_session_info_to_game(slot_name, room_name, goal_str, str(self.scene))
+                send_session_info_to_game(slot_name, room_name, goal_str, str(self.scene), self)
             )
 
             self.items_sent_to_game = 0
 
+            self.used = {KEY_NEXTFREE: 0, "StartWithArmorUsed": 0, KEY_INFINITE_ARMOR: 0}
+            keys = [self.storage_key(KEY_NEXTFREE), self.storage_key("StartWithArmorUsed"), self.storage_key(KEY_INFINITE_ARMOR)]
+            asyncio.create_task(self.send_msgs([
+                {"cmd": "SetNotify", "keys": keys},
+                {"cmd": "Get", "keys": keys},
+            ]))
+
+        elif cmd == "Retrieved":
+            changed = False
+            for key, value in args.get("keys", {}).items():
+                changed = self.apply_storage_value(key, value) or changed
+            if changed:
+                asyncio.create_task(send_used_to_game(self))
+
+        elif cmd == "SetReply":
+            if self.apply_storage_value(args.get("key"), args.get("value")):
+                asyncio.create_task(send_used_to_game(self))
+
         elif cmd == "ReceivedItems":
             asyncio.create_task(send_pending_items_to_game(self))
+
+    def storage_key(self, name: str) -> str:
+        return f"CloneDrone_{self.team}_{self.slot}_{name}"
+
+    def apply_storage_value(self, key, value) -> bool:
+        for name in (KEY_NEXTFREE, "StartWithArmorUsed", KEY_INFINITE_ARMOR):
+            if key == self.storage_key(name):
+                self.used[name] = int(value or 0)
+                return True
+        return False
 
     def make_gui(self):
         ui = super().make_gui()
@@ -178,7 +210,26 @@ class CloneDroneContext(CommonContext):
         return ui
 
 
-async def send_session_info_to_game(slot: str, room: str, goal: str, scene: str):
+async def bump_storage(ctx, name: str):
+    """+1 sur un compteur "utilisés" du DataStorage (atomique côté serveur). La réponse (SetReply) renvoie la valeur au jeu."""
+    await ctx.send_msgs([{
+        "cmd": "Set",
+        "key": ctx.storage_key(name),
+        "default": 0,
+        "want_reply": True,
+        "operations": [{"operation": "add", "value": 1}],
+    }])
+
+
+async def send_used_to_game(ctx):
+    await send_raw_to_game(
+        f"USED:NextFree:{ctx.used[KEY_NEXTFREE]}\n"
+        f"USED:StartArmor:{ctx.used['StartWithArmorUsed']}\n"
+        f"USED:60sInfiniteArmor:{ctx.used[KEY_INFINITE_ARMOR]}\n"
+    )
+
+
+async def send_session_info_to_game(slot: str, room: str, goal: str, scene: str, ctx=None):
     payload = f"SESSION:{slot}|{room}|{goal}|{scene}\n"
     while True:
         try:
@@ -188,6 +239,8 @@ async def send_session_info_to_game(slot: str, room: str, goal: str, scene: str)
             writer.close()
             await writer.wait_closed()
             logger.info(f"Submitted data to Clone Drone Patch (Slot: {slot}, Room: {room}, Goal: {goal}, Scene: {scene})")
+            if ctx is not None:
+                await send_used_to_game(ctx)   # le jeu remet ses compteurs à 0 sur SESSION : on lui renvoie les vrais
             break
         except Exception:
             await asyncio.sleep(3.0)
@@ -245,9 +298,18 @@ async def handle_game_check(reader, writer, ctx: CloneDroneContext):
             # Le jeu n'a pas encore la session (démarré après le client) : on la renvoie avec les items
             slot, room, goal = ctx.session_info
             ctx.items_sent_to_game = 0
-            await send_session_info_to_game(slot, room, goal, str(ctx.scene))
+            await send_session_info_to_game(slot, room, goal, str(ctx.scene), ctx)
         else:
             await send_raw_to_game("PONG\n")
+
+    elif message in ("NEXTFREE_USED", "STARTARMOR_USED", "INFINITEARMOR_USED"):
+        if ctx.server and ctx.slot:
+             key = {
+                 "NEXTFREE_USED": KEY_NEXTFREE,
+                 "STARTARMOR_USED": "StartWithArmorUsed",
+                 "INFINITEARMOR_USED": KEY_INFINITE_ARMOR,
+             }[message]
+             await bump_storage(ctx, key)
 
     elif message.startswith("BUY:"):
         # Achat d'une upgrade dans la boutique : "BUY:<UpgradeType>:<niveau>". Le check est relatif au step en cours.

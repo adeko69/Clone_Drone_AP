@@ -17,17 +17,33 @@ WEAPON_ITEMS = {
     WEAPON_SPEAR: "SpearUnlock",
 }
 
+# Check d'achat (UpgradeType, niveau) déjà possédé quand on démarre un step avec cette arme : il ne doit pas exister.
+# Marteau : le départ donne le niveau 1 (un exemplaire de "Progressive Hammer"), les niveaux 2 et 3 restent à acheter.
+START_WEAPON_CHECK = {
+    WEAPON_SWORD: ("SwordUnlock", 1),
+    WEAPON_BOW: ("BowUnlock", 1),
+    WEAPON_HAMMER: ("Hammer", 1),
+    WEAPON_SPEAR: ("SpearUnlock", 1),
+}
+
+# Réduction de la probabilité de tirer l'Arc comme arme de départ
+BOW_REDUCTION_SAME = 0.25     # Same Per Step (une arme pour tous les steps) : -25 %
+BOW_REDUCTION_RANDOM = 0.75   # Random By Step : -75 %
+
 # Valeurs de l'option "randomize_starting_weapon" (doivent suivre options.py)
 WEAPON_MODE_NONE, WEAPON_MODE_SAME, WEAPON_MODE_RANDOM = 0, 1, 2
 
 
-def _draw_bag(pool: list, count: int, rng) -> list:
-    """Tirage 'sac' : pioche sans remise, le sac est rempli à nouveau quand il est vide."""
+def _draw_bag(pool: list, count: int, rng, chances: dict = None) -> list:
+    """Tirage 'sac' : pioche sans remise, le sac est rempli à nouveau quand il est vide.
+    chances : {valeur: probabilité d'entrer dans le sac à chaque remplissage} (défaut 1).
+    Sans `chances`, aucun nombre aléatoire supplémentaire n'est consommé (seeds existantes inchangées)."""
     pool = list(dict.fromkeys(pool))
+    chances = chances or {}
     values, bag = [], []
     while len(values) < count:
         if not bag:
-            bag = list(pool)
+            bag = [p for p in pool if p not in chances or rng.random() < chances[p]] or list(pool)
         values.append(bag.pop(rng.randrange(len(bag))))
     return values
 
@@ -45,9 +61,14 @@ def generate_weapons(mode: int, step_count: int, rng) -> list:
     - RANDOM : tirage 'sac' sur les 4 armes, donc jamais le même chiffre à chaque step
     """
     if mode == WEAPON_MODE_SAME:
-        return [rng.randrange(WEAPON_COUNT)] * step_count
+        # poids de l'arc w tel que w / (3 + w) = (1/4) * (1 - réduction)
+        p = (1 / WEAPON_COUNT) * (1 - BOW_REDUCTION_SAME)
+        w = (WEAPON_COUNT - 1) * p / (1 - p)
+        weights = [w if x == WEAPON_BOW else 1.0 for x in range(WEAPON_COUNT)]
+        return [rng.choices(range(WEAPON_COUNT), weights=weights)[0]] * step_count
     if mode == WEAPON_MODE_RANDOM:
-        return _draw_bag(list(range(WEAPON_COUNT)), step_count, rng)
+        return _draw_bag(list(range(WEAPON_COUNT)), step_count, rng,
+                         {WEAPON_BOW: 1 - BOW_REDUCTION_RANDOM})
     return [WEAPON_SWORD] * step_count
 
 

@@ -23,21 +23,18 @@ item_table: Dict[str, ItemData] = {
     "Jetpack": ItemData(BASE_ITEM_ID + 10, ItemClassification.progression),
     "Clone": ItemData(BASE_ITEM_ID + 11, ItemClassification.progression),
     "Armor+Repair": ItemData(BASE_ITEM_ID + 12, ItemClassification.useful),
-    "Progressive Hammer": ItemData(BASE_ITEM_ID + 13, ItemClassification.progression),   # x3 : un exemplaire par niveau de Hammer
+    "Progressive Hammer": ItemData(BASE_ITEM_ID + 13, ItemClassification.progression), 
     "FireSword": ItemData(BASE_ITEM_ID + 14, ItemClassification.useful),
     "FireHammer+FireSpear": ItemData(BASE_ITEM_ID + 15, ItemClassification.useful),
     "SpearUnlock": ItemData(BASE_ITEM_ID + 16, ItemClassification.progression),
     "SpearShield+ShieldBash": ItemData(BASE_ITEM_ID + 17, ItemClassification.useful),
     "FireBreath+FireResistance": ItemData(BASE_ITEM_ID + 18, ItemClassification.useful),
-    "NextUpgradeFree": ItemData(BASE_ITEM_ID + 19, ItemClassification.useful),
+    "NextUpgradeFree": ItemData(BASE_ITEM_ID + 19, ItemClassification.filler),
     "Riding": ItemData(BASE_ITEM_ID + 20, ItemClassification.useful),
 }
 
 for i in range(1, 4):
     item_table[f"ShopDiscount_{i}"] = ItemData(BASE_ITEM_ID + 20 + i, ItemClassification.progression)
-
-for i in range(1, 14):
-    item_table[f"NextUpgradeFree_{i}"] = ItemData(BASE_ITEM_ID + 23 + i, ItemClassification.filler)
 
 # Épée : n'entre dans le pool que si elle n'est pas l'arme de départ (voir create_items dans __init__.py)
 item_table["SwordUnlock"] = ItemData(BASE_ITEM_ID + 63, ItemClassification.progression)
@@ -92,3 +89,17 @@ for _step in range(1, MAX_STEPS + 1):
             BASE_ITEM_ID + 100 * _step + (_data.code - BASE_ITEM_ID),
             _data.classification,
         )
+
+
+
+item_table["StartWithArmor"] = ItemData(BASE_ITEM_ID + 64, ItemClassification.filler)
+item_table["60sInfiniteArmor"] = ItemData(BASE_ITEM_ID + 67, ItemClassification.filler)
+item_table["Clone (All Steps)"] = ItemData(BASE_ITEM_ID + 65, ItemClassification.progression)
+
+
+def shop_discount_step_name(step: int) -> str:
+    return f"Shop Discount (Step {step})"
+
+
+for _step in range(1, MAX_STEPS + 1):
+    item_table[shop_discount_step_name(_step)] = ItemData(BASE_ITEM_ID + 100 * _step + 66, ItemClassification.progression)

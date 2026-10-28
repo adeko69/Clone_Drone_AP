@@ -32,8 +32,13 @@ def plan_step_items(candidates: dict, step_locs: dict, rng, forbidden=None, rese
     limit = max(0, total_free - reserve)
 
     counts = {k: min(len(candidates[k]), len(step_locs.get(k, []))) for k in steps}
+    # L'épée (si elle est à trouver) n'est jamais rognée : sans elle le step démarre sans arme.
+    floor = {k: min(counts[k], sum(1 for c in candidates[k] if c.startswith("SwordUnlock ("))) for k in steps}
     while sum(counts.values()) > limit:
-        k = max(counts, key=lambda s: (counts[s], s))   # on rogne le step le plus chargé (le plus haut à égalité)
+        trimmable = [s for s in steps if counts[s] > floor[s]]
+        if not trimmable:
+            break
+        k = max(trimmable, key=lambda s: (counts[s], s))   # on rogne le step le plus chargé (le plus haut à égalité)
         counts[k] -= 1
 
     items = []   # (step, nom)

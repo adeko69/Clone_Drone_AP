@@ -59,6 +59,15 @@ class RandomizeStartingWeapon(Choice):
     option_random_by_step = 2
     default = 0
 
+class StepIsStepLocked(Toggle):
+    """
+    Only used with the Per Step upgrade modes.
+    Items of step N can only be found in the locations of step N (instead of steps 1 to N).
+    Items stay in their own step: they are never placed in other players' worlds.
+    """
+    display_name = "Step Is Step Locked"
+    default = 0
+
 class Normal(Toggle):
     """
     Add Normal Case Scenario (No scenario). If there are no scenarios, then normal is turned on automatically
@@ -100,6 +109,7 @@ class CloneDroneOptions(PerGameCommonOptions):
     death_link: DeathLink
     steps: Steps
     upgrade_mode: UpgradeMode
+    step_is_step_locked: StepIsStepLocked
     randomize_starting_weapon: RandomizeStartingWeapon
     normal: Normal
     inferno: Inferno

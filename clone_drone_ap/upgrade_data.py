@@ -12,7 +12,7 @@ UPGRADE_LOCATION_BASE = 73000      # ID = base + step * 100 + index
 WIN_STEP_INDEX = 90                # index réservé aux "Win Step" (les achats vont de 1 à 37)
 MAX_STEPS = 5
 
-ROMAN = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V"}
+ROMAN = {1: "I", 2: "II", 3: "III"}
 
 # (nom du check, UpgradeType, nombre de niveaux). Un check par niveau, à chaque step.
 # L'épée de base n'y figure pas : on ne peut pas l'acheter.
@@ -42,6 +42,8 @@ UPGRADE_CHECKS: List[Tuple[str, str, int]] = [
     ("Get Fire Resistance", "FireResistance", 1),
     ("Get Raptor Riding", "SummonFlameRaptor", 1),
     ("Get Unicycle Riding", "SummonSawbladeUnicycle", 1),
+    # Ajouté EN DERNIER pour ne pas décaler les IDs existants. Généré seulement si l'épée n'est pas l'arme de départ du step.
+    ("Get Sword", "SwordUnlock", 1),
 ]
 
 
@@ -112,6 +114,7 @@ ITEM_GRANTS: Dict[str, Tuple[str, ...]] = {
     "FireArrow": ("FireArrow",),
     "Jetpack": ("Jetpack",),
     "Clone": ("Clone",),
+    "Clone (All Steps)": ("Clone",),
     "Armor+Repair": ("Armor", "Repair"),
     "Armor": ("Armor",),
     "Repair": ("Repair",),
@@ -149,6 +152,7 @@ PREREQ: Dict[str, str] = {
     "ShieldSize": "SpearUnlock",
     "ShieldBash": "SpearUnlock",
     "Repair": "Armor",
+    "FireSword": "SwordUnlock",   # sans effet si l'épée est l'arme de départ (aucun item SwordUnlock dans le pool)
 }
 
 

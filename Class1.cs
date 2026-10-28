@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using UnityEngine;
@@ -21,15 +22,18 @@ namespace CloneDroneAP
         public static bool IsReceivingFromArchipelago = false;
         public static byte TotalFreeUpgradesReceived = 0;
         public static byte NextUpgradesFree = 0;
+        public static byte NextFreeUsed = 0; 
+        public static byte TotalStartArmorReceived = 0;
+        public static byte StartArmorUsed = 0;
+        public static byte StartWithArmor_left = 0;
+        public static Dictionary<byte, byte> StepShopDiscounts = new Dictionary<byte, byte>();
         public static byte ShopPriceReduction = 0;
 
         public static Dictionary<int, bool> LocalChecks = new Dictionary<int, bool>();
         public static List<UpgradeType> UnlockedUpgrades = new List<UpgradeType>();
-
         public static Dictionary<int, List<UpgradeType>> StepUnlockedUpgrades = new Dictionary<int, List<UpgradeType>>();
         public static byte HammerLevelsGlobal = 0;
         public static Dictionary<byte, byte> StepHammerLevels = new Dictionary<byte, byte>();
-
         public static ConcurrentQueue<string> PendingItems = new ConcurrentQueue<string>();
         private static TcpListener tcpServer;
         private static Thread listenerThread;
@@ -49,8 +53,8 @@ namespace CloneDroneAP
             WeaponSword, WeaponBow, WeaponHammer, WeaponSpear
         }
 
-        public static List<Scenario> Scene = new List<Scenario>();          // X : scénario par step (-1 = step terminé)
-        public static List<Weapons> SceneWeapons = new List<Weapons>();   // Y : arme de départ par step
+        public static List<Scenario> Scene = new List<Scenario>();
+        public static List<Weapons> SceneWeapons = new List<Weapons>();
 
         public static bool NeedsNewRun = false;
         public static Plugin Instance;
@@ -58,7 +62,7 @@ namespace CloneDroneAP
 
         public static bool ScenarioActive(int scenario)
         {
-            if (CurrentScenario != (Scenario) scenario) return false;
+            if (CurrentScenario != (Scenario)scenario) return false;
             GameFlowManager flow = Singleton<GameFlowManager>.Instance;
             return flow != null && !flow.IsOnTitleScreen();
         }
@@ -105,7 +109,6 @@ namespace CloneDroneAP
             }
         }
 
-        // Format : "X:Y;X:Y;..." (l'ancien format "X;X;..." reste accepté, Y vaut alors 0)
         public static void LoadScene(string s)
         {
             List<Scenario> scenarios = new List<Scenario>();
@@ -121,8 +124,8 @@ namespace CloneDroneAP
                     int y = 0;
                     if (!int.TryParse(xy[0].Trim(), out x)) continue;
                     if (xy.Length > 1) int.TryParse(xy[1].Trim(), out y);
-                    scenarios.Add((Scenario) x);
-                    weapons.Add((Weapons) y);
+                    scenarios.Add((Scenario)x);
+                    weapons.Add((Weapons)y);
                 }
             }
             Scene = scenarios;
@@ -160,14 +163,14 @@ namespace CloneDroneAP
         {
             get
             {
-                foreach (int v in Scene) if (v != -1) return (Scenario) v;
+                foreach (int v in Scene) if (v != -1) return (Scenario)v;
                 return Scenario.End;
             }
         }
 
         public static bool IsInfernoActive
         {
-            get { return CurrentScenario == (Scenario) 1; }
+            get { return CurrentScenario == (Scenario)1; }
         }
 
         public static int CurrentStepIndex
@@ -184,7 +187,7 @@ namespace CloneDroneAP
             get
             {
                 int i = CurrentStepIndex;
-                return (i >= 0 && i < SceneWeapons.Count) ? (Weapons) SceneWeapons[i] : (Weapons) Weapons.WeaponSword;
+                return (i >= 0 && i < SceneWeapons.Count) ? (Weapons)SceneWeapons[i] : (Weapons)Weapons.WeaponSword;
             }
         }
 
@@ -198,7 +201,7 @@ namespace CloneDroneAP
             get
             {
                 if (Scene.Count == 0) return 0;
-                return SceneComplete ? (byte) Scene.Count : (byte) (FinishedSteps + 1);
+                return SceneComplete ? (byte)Scene.Count : (byte)(FinishedSteps + 1);
             }
         }
 
@@ -214,8 +217,19 @@ namespace CloneDroneAP
             get
             {
                 byte stepLevels;
-                StepHammerLevels.TryGetValue((byte) CurrentStepNumber, out stepLevels);
+                StepHammerLevels.TryGetValue((byte)CurrentStepNumber, out stepLevels);
                 return HammerLevelsGlobal + stepLevels;
+            }
+        }
+
+        // Remise effective : globaux + celui du step en cours, plafonnée à 3
+        public static int EffectiveShopDiscount
+        {
+            get
+            {
+                byte stepCount;
+                StepShopDiscounts.TryGetValue(CurrentStepNumber, out stepCount);
+                return Mathf.Min(3, ShopPriceReduction + stepCount);
             }
         }
 
@@ -329,79 +343,26 @@ namespace CloneDroneAP
             return false;
         }
 
+        private static readonly FieldInfo UpgradeLevelsField =
+            AccessTools.Field(typeof(UpgradeCollection), "_upgradeLevels");
+
         public static bool TryRemoveUpgrade(object collection, UpgradeType type)
         {
-            if (collection == null) return false;
+            if (collection == null || UpgradeLevelsField == null)
+                return false;
 
-            System.Reflection.BindingFlags flags =
-                System.Reflection.BindingFlags.Instance |
-                System.Reflection.BindingFlags.Public |
-                System.Reflection.BindingFlags.NonPublic;
-
-            // Voie 1 : une méthode de suppression
-            foreach (string name in new[] { "RemoveUpgrade", "RemoveUpgradeIfPresent", "ClearUpgrade", "RemoveUpgradeType" })
+            try
             {
-                foreach (System.Reflection.MethodInfo m in collection.GetType().GetMethods(flags))
-                {
-                    if (m.Name != name) continue;
-                    System.Reflection.ParameterInfo[] ps = m.GetParameters();
-                    try
-                    {
-                        if (ps.Length == 1 && ps[0].ParameterType == typeof(UpgradeType))
-                        {
-                            m.Invoke(collection, new object[] { type });
-                            return true;
-                        }
-                        if (ps.Length == 2 && ps[0].ParameterType == typeof(UpgradeType) && ps[1].ParameterType == typeof(int))
-                        {
-                            m.Invoke(collection, new object[] { type, 0 });
-                            return true;
-                        }
-                    }
-                    catch (System.Exception ex)
-                    {
-                        Log.LogWarning("[AP] " + name + " failed: " + ex.Message);
-                    }
-                }
-            }
+                var levels = UpgradeLevelsField.GetValue(collection)
+                    as System.Collections.Generic.Dictionary<UpgradeType, int>;
 
-            bool removed = false;
-            for (System.Type t = collection.GetType(); t != null && t != typeof(object); t = t.BaseType)
+                return levels != null && levels.Remove(type);
+            }
+            catch (System.Exception ex)
             {
-                foreach (System.Reflection.FieldInfo f in t.GetFields(flags | System.Reflection.BindingFlags.DeclaredOnly))
-                {
-                    object value;
-                    try { value = f.GetValue(collection); }
-                    catch { continue; }
-                    if (value == null || value is string) continue;
-
-                    System.Collections.IList list = value as System.Collections.IList;
-                    if (list != null && !list.IsReadOnly && !list.IsFixedSize)
-                    {
-                        for (int i = list.Count - 1; i >= 0; i--)
-                        {
-                            if (UpgradeMatches(list[i], type))
-                            {
-                                list.RemoveAt(i);
-                                removed = true;
-                            }
-                        }
-                    }
-
-                    // HashSet<UpgradeType>, Dictionary<UpgradeType, ...> : Remove(UpgradeType)
-                    System.Reflection.MethodInfo remove = value.GetType().GetMethod("Remove", new[] { typeof(UpgradeType) });
-                    if (remove != null)
-                    {
-                        try
-                        {
-                            object result = remove.Invoke(value, new object[] { type });
-                            if (result is bool && (bool)result) removed = true;
-                        }
-                        catch { }
-                    }
-                }
+                Log.LogWarning("[AP] TryRemoveUpgrade failed: " + ex.Message);
+                return false;
             }
-            return removed;
         }
 
         public static void StripStartingSword(FirstPersonMover player, object collection)
@@ -637,6 +598,7 @@ namespace CloneDroneAP
             { "FireArrow", new[] { UpgradeType.FireArrow } },
             { "Jetpack", new[] { UpgradeType.Jetpack } },
             { "Clone", new[] { UpgradeType.Clone } },
+            { "Clone (All Steps)", new[] { UpgradeType.Clone } },   // sans suffixe "(Step N)" : va dans la liste globale = Clone de tous les steps
             { "Armor+Repair", new[] { UpgradeType.Armor, UpgradeType.Repair } },
             { "FireSword", new[] { UpgradeType.FireSword } },
             { "FireHammer+FireSpear", new[] { UpgradeType.FireHammer, UpgradeType.FireSpear } },
@@ -782,12 +744,129 @@ namespace CloneDroneAP
 
         public static void RecalculateFreeUpgrades()
         {
-            int usedCount = getNextFreeUsed();
-            NextUpgradesFree = (byte) Mathf.Max(0, (int) TotalFreeUpgradesReceived - usedCount);
+            NextUpgradesFree = (byte)Mathf.Max(0, (int)TotalFreeUpgradesReceived - NextFreeUsed);
         }
+
+        public static void RecalculateStartArmor()
+        {
+            StartWithArmor_left = (byte)Mathf.Max(0, (int)TotalStartArmorReceived - StartArmorUsed);
+        }
+
+        public void ApplyArmorToSpecificPart(Character character, MechBodyPartType targetPart)
+        {
+            List<BaseBodyPart> allBaseBodyParts = character.GetAllBaseBodyParts();
+
+            // Récupère automatiquement les prefabs d'armure associés à ce robot !
+            ArmorPiece[] armorPrefabsUsed = character.GetArmorPrefabsUsed();
+
+            for (int i = 0; i < armorPrefabsUsed.Length; i++)
+            {
+                // On ignore tous les prefabs qui ne correspondent pas à la partie voulue (ex: RightLeg)
+                if (armorPrefabsUsed[i].ShieldingBodyPart != targetPart)
+                {
+                    continue;
+                }
+
+                for (int j = 0; j < allBaseBodyParts.Count; j++)
+                {
+                    if (allBaseBodyParts[j] != null && allBaseBodyParts[j].CanApplyArmorPiece(armorPrefabsUsed[i]))
+                    {
+                        // Instanciation exacte comme dans ArmorManager.instantiateArmorPrefabOnBodyPart
+                        ArmorPiece armorPiece = UnityEngine.Object.Instantiate(
+                            armorPrefabsUsed[i],
+                            allBaseBodyParts[j].transform.parent,
+                            worldPositionStays: false
+                        );
+                        armorPiece.transform.localPosition = Vector3.zero;
+                        armorPiece.Initialize(allBaseBodyParts[j], character);
+                        allBaseBodyParts[j].SetArmor(armorPiece);
+                        character.TrackArmorPiece(armorPiece);
+                    }
+                }
+            }
+
+            character.OnAttemptedToAddArmorPieces();
+
+            // Si c'est le joueur principal, on sauvegarde aussi l'info dans les données du jeu
+            if (character.IsMainPlayer())
+            {
+                var playerArmorList = Singleton<GameDataManager>.Instance.GetPlayerArmorList();
+                if (!playerArmorList.Contains(targetPart))
+                {
+                    playerArmorList.Add(targetPart);
+                    Singleton<GameDataManager>.Instance.SetDirty();
+                }
+            }
+        }
+
+        static List<MechBodyPartType> armor_before_infinite = new List<MechBodyPartType> { };
+        public static float infinite_armor_seconds = 0;
+
+        public static byte TotalInfiniteArmorReceived = 0;
+        public static byte InfiniteArmorUsed = 0;
+        public static byte InfiniteArmor_left = 0;
+
+        public static void RecalculateInfiniteArmor()
+        {
+            InfiniteArmor_left = (byte)Mathf.Max(0, (int)TotalInfiniteArmorReceived - InfiniteArmorUsed);
+        }
+
+        public static void ConsumeInfiniteArmor(Character p)
+        {
+            if(infinite_armor_seconds <= 0f)
+            {
+                foreach (MechBodyPartType mbpt in p.GetBodyPartTypesCoveredByArmor())
+                {
+                    armor_before_infinite.Add(mbpt);
+                }
+            }
+            infinite_armor_seconds += 60f;
+            if (InfiniteArmorUsed < byte.MaxValue) InfiniteArmorUsed++;
+            RecalculateInfiniteArmor();
+            SendToClient("INFINITEARMOR_USED");
+        }
+
+        private void OnInfiniteArmorEnded(Character c)
+        {
+            ArmorManager.Instance.RemoveArmorFrom(c);
+            foreach(MechBodyPartType mbpt in armor_before_infinite)
+            {
+                ApplyArmorToSpecificPart(c, mbpt);
+            }
+            armor_before_infinite.Clear();
+        }
+
 
         private void Update()
         {
+
+            //if(Singleton<CharacterTracker>.Instance.GetPlayer() != null)　ApplyArmorToSpecificPart(Singleton<CharacterTracker>.Instance.GetPlayer(), MechBodyPartType.Spine);
+            //if(Singleton<CharacterTracker>.Instance.GetPlayer() != null && Singleton<CharacterTracker>.Instance.GetPlayer().IsAlive())  ArmorManager.Instance.ApplyArmorTo(Singleton<CharacterTracker>.Instance.GetPlayer(), forceGiveArmor: true);
+            
+            Character player = Singleton<CharacterTracker>.Instance.GetPlayer();
+
+            if (InfiniteArmor_left != 0 && player != null && player.IsAlive() && Singleton<GameFlowManager>.Instance.IsInCombat())
+            {
+                ConsumeInfiniteArmor(player);
+            }
+
+            if (infinite_armor_seconds > 0f && player != null && player.IsAlive() && Singleton<GameFlowManager>.Instance.IsInCombat())
+            {
+                infinite_armor_seconds -= Time.deltaTime;
+                if (ArmorManager.Instance != null)
+                    {
+                        ArmorManager.Instance.ApplyArmorTo(player, forceGiveArmor: true);
+                    }
+
+                if (infinite_armor_seconds <= 0f)
+                {
+                    infinite_armor_seconds = 0f;
+                    if (InfiniteArmor_left != 0) ConsumeInfiniteArmor(player);
+                    else OnInfiniteArmorEnded(player);
+                }
+            }
+
+
             while (PendingItems.TryDequeue(out string message))
             {
                 if (message == "DEATHLINK")
@@ -807,17 +886,27 @@ namespace CloneDroneAP
                         CurrentGoal = parts[2].Trim().ToLower();
                         LoadScene(parts.Length >= 4 ? parts[3] : "");
                         StepUnlockedUpgrades.Clear();
+                        UnlockedUpgrades.Clear();
                         HammerLevelsGlobal = 0;
                         StepHammerLevels.Clear();
                         ShopPriceReduction = 0;
+                        StepShopDiscounts.Clear();
                         TotalFreeUpgradesReceived = 0;
+                        TotalStartArmorReceived = 0;
+                        NextFreeUsed = 0;
+                        StartArmorUsed = 0;
                         NeedsNewRun = false;
                         SessionActive = true;
                         _connResult = 1;
                         RefreshMultiplayerLabel();
 
-                        Log.LogInfo($"[AP SESSION] Slot : {CurrentSlotName} | Room : {CurrentRoomName} | Goal : {CurrentGoal.ToUpper()} | Scene : {SceneToString()}");
+                        TotalInfiniteArmorReceived = 0;
+                        InfiniteArmorUsed = 0;
+                        infinite_armor_seconds = 0f;
+                        armor_before_infinite.Clear();
+                        RecalculateInfiniteArmor();
                         RecalculateFreeUpgrades();
+                        RecalculateStartArmor();
                     }
                     continue;
                 }
@@ -842,6 +931,33 @@ namespace CloneDroneAP
                     SessionActive = false;
                     _connResult = -1;
                     RefreshMultiplayerLabel();
+                    continue;
+                }
+
+                if (message.StartsWith("USED:"))
+                {
+                    string[] up = message.Split(':');
+                    int n;
+                    if (up.Length == 3 && int.TryParse(up[2], out n))
+                    {
+                        byte v = (byte)Mathf.Clamp(n, 0, 255);
+                        if (up[1] == "NextFree")
+                        {
+                            NextFreeUsed = (byte)Mathf.Max((int)NextFreeUsed, (int)v);
+                            RecalculateFreeUpgrades();
+                        }
+                        else if (up[1] == "StartArmor")
+                        {
+                            StartArmorUsed = (byte)Mathf.Max((int)StartArmorUsed, (int)v);
+                            RecalculateStartArmor();
+                        }
+                        else if (up[1] == "60sInfiniteArmor")
+                        {
+                            InfiniteArmorUsed = (byte)Mathf.Max((int)InfiniteArmorUsed, (int)v);
+                            RecalculateInfiniteArmor();
+                        }
+                        RefreshUpgradeShop();
+                    }
                     continue;
                 }
 
@@ -887,50 +1003,21 @@ namespace CloneDroneAP
                 }
             });
         }
-
-        public static string GetSaveFilePath()
+        public static void ConsumeNextFree()
         {
-            string saveDir = Path.Combine(Paths.ConfigPath, "CloneDroneAP", "save");
-            Directory.CreateDirectory(saveDir);
-
-            string safeSlot = string.Join("_", CurrentSlotName.Split(Path.GetInvalidFileNameChars()));
-            string safeRoom = string.Join("_", CurrentRoomName.Split(Path.GetInvalidFileNameChars()));
-
-            return Path.Combine(saveDir, $"{safeSlot}_{safeRoom}_used.txt");
+            if (NextFreeUsed < byte.MaxValue) NextFreeUsed++;
+            RecalculateFreeUpgrades();
+            SendToClient("NEXTFREE_USED");
         }
 
-        public static int getNextFreeUsed()
+        // Idem pour Start with Armor
+        public static void ConsumeStartArmor()
         {
-            try
-            {
-                string path = GetSaveFilePath();
-                if (File.Exists(path))
-                {
-                    string content = File.ReadAllText(path).Trim();
-                    if (byte.TryParse(content, out byte value))
-                    {
-                        return value;
-                    }
-                }
-            }
-            catch (System.Exception e)
-            {
-                Log.LogError($"[SAVE] Can't read: {e.Message}");
-            }
-            return 0;
-        }
-
-        public static void SetUsedNextFreeCount(int count)
-        {
-            try
-            {
-                string path = GetSaveFilePath();
-                File.WriteAllText(path, count.ToString());
-            }
-            catch (System.Exception e)
-            {
-                Log.LogError($"[SAVE] Can't write: {e.Message}");
-            }
+            if (StartArmorUsed < byte.MaxValue) StartArmorUsed++;
+            RecalculateStartArmor();
+            
+            //
+            SendToClient("STARTARMOR_USED");
         }
 
         public static void ap_grant_item(string itemName)
@@ -958,15 +1045,46 @@ namespace CloneDroneAP
                 return;
             }
 
+            if (itemName == "60sInfiniteArmor")
+            {
+                TotalInfiniteArmorReceived++;
+                RecalculateInfiniteArmor();
+                return;
+            }
+
+            if (itemName == "StartWithArmor")
+            {
+                TotalStartArmorReceived+=3;
+                RecalculateStartArmor();
+                return;
+            }
+
             byte step;
             string baseName = SplitStepSuffix(itemName, out step);
+
+            // "Shop Discount (Step N)" : compte comme un ShopDiscount pendant le step N, le total reste plafonné à 3
+            if (baseName == "Shop Discount")
+            {
+                if (step > 0)
+                {
+                    byte ownedDiscounts;
+                    StepShopDiscounts.TryGetValue(step, out ownedDiscounts);
+                    StepShopDiscounts[step] = (byte)(ownedDiscounts + 1);
+                }
+                else
+                {
+                    ShopPriceReduction++;
+                }
+                RefreshUpgradeShop();
+                return;
+            }
 
             if (baseName == "Progressive Hammer")
             {
                 if (step > 0)
                 {
                     byte owned;
-                    StepHammerLevels.TryGetValue((byte) step, out owned);
+                    StepHammerLevels.TryGetValue((byte)step, out owned);
                     StepHammerLevels[step] = (byte)(owned + 1);
                 }
                 else
@@ -1037,7 +1155,7 @@ namespace CloneDroneAP
 
         static void Postfix(FirstPersonMover __instance)
         {
-            if (Plugin.CurrentScenario != (Plugin.Scenario) 3) return;
+            if (Plugin.CurrentScenario != (Plugin.Scenario)3) return;
             if (_isSpawningMount || __instance == null || !__instance.IsAlive())
                 return;
 
@@ -1161,6 +1279,11 @@ namespace CloneDroneAP
 
             Plugin.LocalChecks[totalLevelsWon] = true;
 
+            if(Plugin.infinite_armor_seconds > 0f)
+            {
+                Plugin.infinite_armor_seconds += 8f;
+            }
+
             int goalLevel = Plugin.GetGoalLevel();
             if (goalLevel > 0)
             {
@@ -1226,8 +1349,9 @@ namespace CloneDroneAP
             }
             else
             {
-                int discountedMultiplier = Mathf.Max(1, 3 - Plugin.ShopPriceReduction);
-                if (Plugin.ShopPriceReduction == 3)
+                int discount = Plugin.EffectiveShopDiscount;   // globaux + Shop Discount du step, plafonné à 3
+                int discountedMultiplier = Mathf.Max(1, 3 - discount);
+                if (discount == 3)
                 {
                     __result = 1;
                 }
@@ -1327,9 +1451,7 @@ namespace CloneDroneAP
                 // Ta logique existante pour les Free Upgrades
                 if (__state)
                 {
-                    int currentUsed = Plugin.getNextFreeUsed();
-                    Plugin.SetUsedNextFreeCount(currentUsed + 1);
-                    Plugin.RecalculateFreeUpgrades();
+                    Plugin.ConsumeNextFree();   // DataStorage via le client Python
                 }
             }
         }
@@ -1530,7 +1652,7 @@ namespace CloneDroneAP
 
         static void Prefix(EnemyFactory __instance, ref Transform enemyPrefab)
         {
-            if (Plugin.CurrentScenario != (Plugin.Scenario) 2 && Plugin.CurrentScenario != (Plugin.Scenario) 4) return;
+            if (Plugin.CurrentScenario != (Plugin.Scenario)2 && Plugin.CurrentScenario != (Plugin.Scenario)4) return;
             if (enemyPrefab == null) return;
 
             Character charComp = enemyPrefab.GetComponent<Character>();
@@ -1542,7 +1664,7 @@ namespace CloneDroneAP
             EnemyType targetType = EnemyType.ArmorBot;
             int endLevel = LevelManager.Instance.GetNumberOfLevelsWon();
 
-            if (Plugin.CurrentScenario == (Plugin.Scenario) 2)
+            if (Plugin.CurrentScenario == (Plugin.Scenario)2)
             {
 
 
@@ -1570,7 +1692,7 @@ namespace CloneDroneAP
                 }
             }
 
-            else if (Plugin.CurrentScenario == (Plugin.Scenario) 4)
+            else if (Plugin.CurrentScenario == (Plugin.Scenario)4)
             {
                 EnemyType[] enemies = endLevel > 13
                     ? RandomEnemiesLate
@@ -1661,7 +1783,7 @@ namespace CloneDroneAP
                 Plugin.StripStartingSword(__instance, upgrades);
             }
 
-            upgrades.AddUpgradeIfMissing(Plugin.WeaponToUpgrade((int) Plugin.CurrentWeapon), 1);
+            upgrades.AddUpgradeIfMissing(Plugin.WeaponToUpgrade((int)Plugin.CurrentWeapon), 1);
         }
 
         static void Postfix(FirstPersonMover __instance)
@@ -1675,9 +1797,51 @@ namespace CloneDroneAP
             if (key == _equippedKey) return;
             _equippedKey = key;
 
-            byte weapon = (byte) Plugin.CurrentWeapon;
+            byte weapon = (byte)Plugin.CurrentWeapon;
             bool ok = Plugin.TryEquipWeapon(__instance, weapon);
             Plugin.Log.LogInfo($"[AP] Starting weapon {Plugin.WeaponName(weapon)} equipped: {ok}");
+        }
+    }
+
+    [HarmonyPatch(typeof(FirstPersonMover), "RefreshUpgrades")]
+    public class StartWithArmorPatch
+    {
+        private static long _armorKey = long.MinValue;
+
+        static void Postfix(FirstPersonMover __instance)
+        {
+            if (__instance == null || !__instance.IsMainPlayer() || !__instance.IsAlive()) return;
+            if (Plugin.StartWithArmor_left == 0) return;
+            if (__instance.GetTimeSinceCreation() >= 1f) return;
+
+            // Une seule application par joueur et par step (RefreshUpgrades est appelé plusieurs fois)
+            long key = (long)__instance.GetInstanceID() * 10L + Plugin.FinishedSteps;
+            if (key == _armorKey) return;
+            _armorKey = key;
+
+            if (Plugin.Instance != null) Plugin.Instance.StartCoroutine(ApplyArmorRoutine(__instance));
+        }
+
+        private static IEnumerator ApplyArmorRoutine(FirstPersonMover player)
+        {
+            yield return null;   // laisse le modèle du personnage finir de s'initialiser
+
+            if (player == null || !player.IsAlive() || Plugin.StartWithArmor_left == 0) yield break;
+
+            ArmorManager armorManager = Singleton<ArmorManager>.Instance;
+            if (armorManager == null) yield break;
+
+            armorManager.ApplyArmorTo(player, forceGiveArmor: true);
+
+            if (armorManager.HasAnyArmor(player))
+            {
+                Plugin.ConsumeStartArmor();
+                Plugin.Log.LogInfo($"[AP] Start with Armor applied. Left: {Plugin.StartWithArmor_left}");
+            }
+            else
+            {
+                Plugin.Log.LogWarning("[AP] Start with Armor: no armor applied, not consumed");
+            }
         }
     }
 }

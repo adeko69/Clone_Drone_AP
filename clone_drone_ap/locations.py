@@ -47,7 +47,16 @@ for _r in range(1, MAX_STEPS):
     LOCATION_STEP[_name] = _r
 
 
-def get_active_location_names(goal_value: int, step_count: int) -> List[str]:
+def get_level_names_by_step(goal_value: int, step_count: int) -> Dict[int, List[str]]:
+    """{step: [noms des locations de niveau actives]} (le dernier niveau du dernier step = Goal, retiré)."""
+    n = GOAL_LEVELS[goal_value]
+    out = {r: [loc_name(r, l) for l in range(1, n + 1)] for r in range(1, step_count + 1)}
+    out[step_count] = out[step_count][:-1]
+    return out
+
+
+def get_active_location_names(goal_value: int, step_count: int, skipped_ids=()) -> List[str]:
+    """skipped_ids : IDs des checks d'achat à ne pas créer (l'arme de départ de chaque step est déjà possédée)."""
     n = GOAL_LEVELS[goal_value]
 
     # Niveaux : le dernier check = validation de la run (Goal Victory)
@@ -56,7 +65,8 @@ def get_active_location_names(goal_value: int, step_count: int) -> List[str]:
 
     # Achats d'upgrades de chaque step
     for r in range(1, step_count + 1):
-        names.extend(name for name, _code, _upgrade in upgrade_checks_for_step(r))
+        names.extend(name for name, _code, _upgrade in upgrade_checks_for_step(r)
+                     if _code not in skipped_ids)
 
     # Win Step : pas pour le dernier step
     names.extend(win_step_name(r) for r in range(1, step_count))

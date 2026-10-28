@@ -10,7 +10,7 @@ def create_regions(world):
     step_val = world.options.steps.value
 
     # Locations dynamiques selon le goal et le nombre de steps
-    for location_name in get_active_location_names(goal_val, step_val):
+    for location_name in get_active_location_names(goal_val, step_val, getattr(world, "skipped_checks", ())):
         location = CloneDroneLocation(
             world.player,
             location_name,
