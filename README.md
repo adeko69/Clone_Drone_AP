@@ -35,6 +35,11 @@ Launch Archipelago Launcher and find Clone Drone Client.
 
 ## Remove patch
 To restore the normal game, just rename "./BepInEx" as "./.BepInEx/" (just put a point behind). Patcher wont work and game will be restored without the patch being active
+
 ## Edit of the Patch
 
 I allow player to edit, fork and modify this patch. I'm a sole java dev doing it as hobby and this project is in C# and python so there is maybe major issues lol. Try contacting me @adeko69 on discord to push update and review things
+
+## Unmaintenance of the code
+
+Starting v2.0.1, I'll no longer push update except major game update. The reason is that I wanted an AP of this game to play with my friend, and now that everything I wanted to add is there, I don't need other features for now. If I have more things to had I may do it, but I'm already on my limits on some things (ex. add Emperor in the endless mode is more likely impossible except for the devs themself)
