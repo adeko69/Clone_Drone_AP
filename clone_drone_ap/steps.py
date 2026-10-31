@@ -1,17 +1,10 @@
-"""Planification des upgrades par step (mode "Per Step").
-
-Règles :
-- une upgrade "(Step N)" ne peut se trouver que dans les locations des steps 1 à N
-  (un step bas ne peut pas dépendre d'un step plus haut) ; elle n'est utilisable que pendant le step N (côté C#) ;
-- un item ne peut pas être posé dans le check de sa propre upgrade, ni d'une upgrade qui en dépend
-  (callable `forbidden(item, location)` fournie par l'appelant).
-
-Fonction pure (sans Archipelago) pour pouvoir la tester seule.
-"""
 import sys
 
 # Items globaux gardés en priorité quand les locations sont rares
-GLOBAL_PRIORITY = ["ShopDiscount_1", "ShopDiscount_2", "ShopDiscount_3", "NextUpgradeFree"]
+GLOBAL_PRIORITY = [f"ShopDiscount_{i}" for i in range(1, 6)] + ["NextUpgradeFree"]
+
+def _is_priority(c):  # épée ou clé
+    return c.startswith("SwordUnlock (") or c == "Progressive Key"
 
 
 def plan_step_items(candidates: dict, step_locs: dict, rng, forbidden=None, reserve: int = 0) -> list:
@@ -33,7 +26,7 @@ def plan_step_items(candidates: dict, step_locs: dict, rng, forbidden=None, rese
 
     counts = {k: min(len(candidates[k]), len(step_locs.get(k, []))) for k in steps}
     # L'épée (si elle est à trouver) n'est jamais rognée : sans elle le step démarre sans arme.
-    floor = {k: min(counts[k], sum(1 for c in candidates[k] if c.startswith("SwordUnlock ("))) for k in steps}
+    floor = {k: min(counts[k], sum(1 for c in candidates[k] if _is_priority(c))) for k in steps}
     while sum(counts.values()) > limit:
         trimmable = [s for s in steps if counts[s] > floor[s]]
         if not trimmable:
@@ -43,8 +36,8 @@ def plan_step_items(candidates: dict, step_locs: dict, rng, forbidden=None, rese
 
     items = []   # (step, nom)
     for k in steps:
-        head = [c for c in candidates[k] if c.startswith("SwordUnlock (")]   # l'épée passe toujours en premier
-        rest = [c for c in candidates[k] if not c.startswith("SwordUnlock (")]
+        head = [c for c in candidates[k] if _is_priority(c)]
+        rest = [c for c in candidates[k] if not _is_priority(c)]
         rng.shuffle(rest)
         for name in (head + rest)[:counts[k]]:
             items.append((k, name))

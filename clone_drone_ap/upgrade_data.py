@@ -62,6 +62,13 @@ _EXPANDED = _expand()
 UPGRADE_CHECKS_PER_STEP = len(_EXPANDED)
 assert UPGRADE_CHECKS_PER_STEP < WIN_STEP_INDEX
 
+# ID (un octet) de chaque NIVEAU d'upgrade : c'est l'index du check (1..N), donc "Hammer II" a son propre ID.
+# DOIT rester identique à l'enum UpgradesClass côté C# (0 = aucune). Comme pour les IDs de locations :
+# ne jamais décaler, toute nouvelle upgrade s'ajoute à la fin de UPGRADE_CHECKS.
+UPGRADE_LEVEL_IDS: Dict[Tuple[str, int], int] = {(up, lvl): index for index, _base, up, lvl in _EXPANDED}
+UPGRADE_LEVEL_BY_ID: Dict[int, Tuple[str, int]] = {i: key for key, i in UPGRADE_LEVEL_IDS.items()}
+assert len(UPGRADE_LEVEL_BY_ID) == len(UPGRADE_LEVEL_IDS) and max(UPGRADE_LEVEL_BY_ID) <= 255
+
 
 def upgrade_check_name(step: int, base: str, upgrade: str, level: int) -> str:
     levels = next(l for n, u, l in UPGRADE_CHECKS if u == upgrade)
@@ -77,6 +84,13 @@ def upgrade_checks_for_step(step: int) -> List[Tuple[str, int, str]]:
          upgrade)
         for index, base, upgrade, level in _EXPANDED
     ]
+
+
+def upgrade_location_id_by_level_id(step: int, level_id: int) -> Optional[int]:
+    """ID de la location "achat" à partir de l'ID de niveau (UpgradesClass), ou None s'il est inconnu."""
+    if not 1 <= step <= MAX_STEPS or level_id not in UPGRADE_LEVEL_BY_ID:
+        return None
+    return UPGRADE_LOCATION_BASE + step * 100 + level_id
 
 
 def win_step_name(step: int) -> str:
@@ -137,32 +151,40 @@ ITEM_GRANTS: Dict[str, Tuple[str, ...]] = {
 }
 
 # ----------------------------------------------------------------------------
-# Dépendances de l'arbre : enfant -> parent. À COMPLÉTER / VÉRIFIER avec le vrai arbre du jeu.
-# Se tromper en ajoutant une dépendance ne fait que restreindre un peu le placement ;
-# en oublier une peut créer un blocage (ex : l'item parent posé dans le check de son enfant).
+# Dépendances de l'arbre : enfant -> TOUS ses parents (il en faut parfois plusieurs).
+# Les noms sont ceux de l'enum UpgradeType (donc "FlameBreath", pas "FireBreath").
+# À VÉRIFIER avec le vrai arbre du jeu : une dépendance oubliée peut créer un blocage
+# (item parent posé dans le check de son enfant), une dépendance en trop ne fait que restreindre le placement.
 # ----------------------------------------------------------------------------
-PREREQ: Dict[str, str] = {
-    "ArrowWidth": "BowUnlock",
-    "AimTime": "BowUnlock",
-    "FireArrow": "BowUnlock",
-    "KickPower": "KickUnlock",
-    "GetUp": "KickUnlock",
-    "FireHammer": "Hammer",
-    "FireSpear": "SpearUnlock",
-    "ShieldSize": "SpearUnlock",
-    "ShieldBash": "SpearUnlock",
-    "Repair": "Armor",
-    "FireSword": "SwordUnlock",   # sans effet si l'épée est l'arme de départ (aucun item SwordUnlock dans le pool)
+PREREQ: Dict[str, Tuple[str, ...]] = {
+    "ArrowWidth": ("BowUnlock",),
+    "AimTime": ("BowUnlock", "EnergyCapacity"),
+    "FireArrow": ("BowUnlock",),
+    "KickPower": ("KickUnlock",),
+    "GetUp": ("KickUnlock",),
+    "FireHammer": ("Hammer",),
+    "FireSpear": ("SpearUnlock",),
+    "ShieldSize": ("SpearUnlock",),
+    "ShieldBash": ("ShieldSize", "KickUnlock"),
+    "FireSword": ("SwordUnlock",),
+    "BlockArrows": ("SwordUnlock",),
+    "FlameBreath": ("EnergyCapacity",),
+    "FireResistance": ("FlameBreath",),
+    "EnergyRecharge": ("EnergyCapacity",),
 }
 
 
 def blockers(upgrade: str) -> set:
-    """L'upgrade elle-même et tous ses ancêtres : les items qui les débloquent ne peuvent pas
-    se trouver dans le check de cette upgrade (il faudrait déjà les avoir pour l'acheter)."""
-    result = {upgrade}
-    while upgrade in PREREQ:
-        upgrade = PREREQ[upgrade]
-        result.add(upgrade)
+    """L'upgrade elle-même et tous ses ancêtres (tous les parents, récursivement) : les items qui les
+    débloquent ne peuvent pas se trouver dans le check de cette upgrade (il faudrait déjà les avoir pour l'acheter)."""
+    result = set()
+    stack = [upgrade]
+    while stack:
+        current = stack.pop()
+        if current in result:
+            continue
+        result.add(current)
+        stack.extend(PREREQ.get(current, ()))
     return result
 
 

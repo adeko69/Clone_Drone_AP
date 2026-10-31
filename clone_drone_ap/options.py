@@ -42,6 +42,28 @@ class UpgradeMode(Choice):
     option_per_step_ungrouped = 3
     default = 0
 
+class SkillpointPrice(Range):
+    """
+    Starting skillpoint price multiplier.
+    Every upgrade costs (base price x current multiplier).
+    Each Shop Discount item found lowers the multiplier by 1 (minimum x1).
+    The number of Shop Discount items in the pool equals this value.
+    """
+    display_name = "Skillpoint Price"
+    range_start = 1
+    range_end = 5
+    default = 3
+
+class OverpricedShop(Range):
+    """
+    Make X upgrades being +3 skillpoint. Randomized on every death.
+    0 disable the feature.
+    """
+    display_name = "Overpriced Shop"
+    range_start = 0
+    range_end = 10
+    default = 0
+
 class RandomizeStartingWeapon(Choice):
     """
     Randomize the weapon you start each step with (Sword, Bow, Hammer or Spear).
@@ -63,9 +85,8 @@ class StepIsStepLocked(Toggle):
     """
     Only used with the Per Step upgrade modes.
     Items of step N can only be found in the locations of step N (instead of steps 1 to N).
-    Items stay in their own step: they are never placed in other players' worlds.
     """
-    display_name = "Step Is Step Locked"
+    display_name = "Step Items are Step Locked"
     default = 0
 
 class Normal(Toggle):
@@ -103,17 +124,48 @@ class Armor(Toggle):
     default = 0
 
 
+class LevelUp(Toggle):
+    """Most of enemies becomes an harder version of themselves."""
+    display_name = "Level Up"
+    default = 0
+
+class EasyMode(Toggle):
+    """Most of enemies becomes an easier version of themselves"""
+    display_name = "Easy Mode"
+    default = 0
+
+
+class MultiStepKeys(Choice):
+    """
+    Keys required to validate "Win Step".
+    - No: no key, a step is won as soon as its last level is cleared.
+    - Yes without the last: one Progressive Key per step, except the last one (N steps -> N-1 keys).
+    - Yes including the last: the Goal also needs a key (N steps -> N keys).
+    Key N is always found inside step N. Without it, clearing the final level does nothing: the game goes on.
+    """
+    display_name = "Multi-Step Keys"
+    option_no = 0
+    option_yes_without_last = 1
+    option_yes_including_last = 2
+    default = 0
+
+
 @dataclass
 class CloneDroneOptions(PerGameCommonOptions):
     goal: CloneDroneGoal
     death_link: DeathLink
-    steps: Steps
     upgrade_mode: UpgradeMode
-    step_is_step_locked: StepIsStepLocked
     randomize_starting_weapon: RandomizeStartingWeapon
+    skillpoint_price: SkillpointPrice
+    overpriced_shop: OverpricedShop
+    steps: Steps
+    step_is_step_locked: StepIsStepLocked
+    multi_step_keys: MultiStepKeys
     normal: Normal
     inferno: Inferno
     jetpack: Sprinter
     raptor: Raptor
     random: TotallyRandom
     armor: Armor
+    levelup: LevelUp
+    easymode: EasyMode

@@ -3,11 +3,12 @@ import random
 import Utils
 from CommonClient import CommonContext, server_loop, gui_enabled, ClientCommandProcessor, logger, get_base_parser
 from NetUtils import ClientStatus
-from .upgrade_data import upgrade_location_id, win_step_location_id, upgrade_checks_for_step
+from .upgrade_data import upgrade_location_id, win_step_location_id, upgrade_checks_for_step, upgrade_location_id_by_level_id
 from .scenarios import (
     generate_scene,
     SCENARIO_NORMAL, SCENARIO_INFERNO, SCENARIO_SPRINTER,
     SCENARIO_RAPTOR, SCENARIO_RANDOM, SCENARIO_ARMOR,
+    SCENARIO_LEVELUP, SCENARIO_EASYMODE,
 )
 
 # --- Constantes (doivent rester synchronisées avec locations.py) ---
@@ -15,6 +16,7 @@ BASE_LOCATION_ID = 72000
 STRIDE = 40
 GOAL_LEVELS = {1: 15, 2: 23, 3: 33, 4: 4}
 GOAL_NAMES = {1: "titanium", 2: "uranium", 3: "insanium", 4: "silver"}
+KEY_ITEM = "Progressive Key"   # doit rester synchronisé avec items.py et le C# (ap_grant_item)
 
 # Les checks d'achat sont relatifs au step : une fois le step fini, ceux qui n'ont pas été faits ne peuvent plus l'être.
 # True = finir un step valide aussi tous ses checks d'achat restants, pour que les items qu'ils contiennent
@@ -71,25 +73,35 @@ class Scene:
                 return
 
 
-def resolve_check(scene: Scene, goal_n: int, level: int):
+def resolve_check(scene: Scene, goal_n: int, level: int, keys_mode: int = 0, keys: int = 0):
     """Retourne (liste d'IDs de locations, victoire, scene_modifiée).
 
     Finir un step qui n'est pas le dernier valide le niveau final du step, "Win Step X" et (si activé)
-    tous les checks d'achat restants du step. Finir le dernier step = victoire."""
+    tous les checks d'achat restants du step. Finir le dernier step = victoire.
+
+    keys_mode : 0 = pas de clé, 1 = clés sauf pour le dernier step, 2 = clés pour tous les steps.
+    keys      : nombre de "Progressive Key" reçues. Le step N exige `keys >= N` quand une clé est requise.
+    Sans la clé, le check du niveau final part quand même, mais le step n'est pas validé : le jeu continue."""
     if scene is None or scene.complete or level < 1:
-        return [], False, False
-    if level > goal_n:                       # dépassement : on ne casse rien
         return [], False, False
     finished = scene.finished
     is_last_step = finished == len(scene.values) - 1
+    if level > goal_n:
+        if keys_mode == 0:                   # dépassement : on ne casse rien
+            return [], False, False
+        level = goal_n                       # niveau final franchi sans clé, clé reçue depuis : on valide maintenant
     ids = [BASE_LOCATION_ID + finished * STRIDE + level]
-    if level == goal_n:                      # fin du step
-        scene.mark_done()
-        if is_last_step:
-            return purchase_checks_of_step(finished + 1), True, True   # check ultime = victoire
-        ids.append(win_step_location_id(finished + 1))
-        ids.extend(purchase_checks_of_step(finished + 1))
-    return ids, False, level == goal_n
+    if level != goal_n:
+        return ids, False, False
+    required = keys_mode == 2 or (keys_mode == 1 and not is_last_step)
+    if required and keys < finished + 1:
+        return ids, False, False             # pas de clé : le niveau compte, le step continue
+    scene.mark_done()
+    if is_last_step:
+        return purchase_checks_of_step(finished + 1), True, True   # check ultime = victoire
+    ids.append(win_step_location_id(finished + 1))
+    ids.extend(purchase_checks_of_step(finished + 1))
+    return ids, False, True
 
 
 class CloneDroneCommandProcessor(ClientCommandProcessor):
@@ -110,7 +122,10 @@ class CloneDroneContext(CommonContext):
         self.items_sent_to_game = 0
         self.scene = None
         self.session_info = None   # (slot, room, goal) une fois connecté à Archipelago
+        self.skillpoint_price = 3  # multiplicateur de prix de départ (option skillpoint_price)
+        self.overpriced_shop = 0   # nombre d'upgrades à +3 skillpoints, retirées au hasard à chaque mort (0 = désactivé)
         self.goal_n = GOAL_LEVELS[2]
+        self.keys_mode = 0         # option multi_step_keys (0 = non, 1 = sans le dernier, 2 = avec le dernier)
         self.used = {KEY_NEXTFREE: 0, "StartWithArmorUsed": 0, KEY_INFINITE_ARMOR: 0}
 
         # Démarre le serveur TCP local immédiatement pour écouter le jeu, même hors connexion
@@ -137,6 +152,7 @@ class CloneDroneContext(CommonContext):
             step_count = slot_data.get("steps", 1)
             goal_value = slot_data.get("goal", 2)
             self.goal_n = GOAL_LEVELS.get(goal_value, 23)
+            self.keys_mode = int(slot_data.get("multi_step_keys", 0))   # anciennes seeds : pas de clé
 
             slot_name = self.auth or "UnknownSlot"
             room_name = getattr(self, "seed_name", None) or "DefaultRoom"
@@ -153,19 +169,24 @@ class CloneDroneContext(CommonContext):
                 if slot_data.get("raptor", 0):   scenarios.append(SCENARIO_RAPTOR)
                 if slot_data.get("random", 0):   scenarios.append(SCENARIO_RANDOM)
                 if slot_data.get("armor", 0):    scenarios.append(SCENARIO_ARMOR)
+                if slot_data.get("levelup", 0):  scenarios.append(SCENARIO_LEVELUP)
+                if slot_data.get("easymode", 0): scenarios.append(SCENARIO_EASYMODE)
                 if not scenarios:
                     scenarios = [SCENARIO_NORMAL]
                 rng = random.Random(f"{getattr(self, 'seed_name', '') or ''}:{self.slot}")
                 self.scene = Scene(generate_scene(scenarios, step_count, rng))
 
             # Progression restaurée depuis le serveur :
-            # le check du niveau goal_n d'un step = step fini
+            # "Win Step r+1" coché = step r+1 fini (le check du niveau final ne suffit plus : avec les clés,
+            # il part même quand le step n'est pas validé)
             checked = set(args.get("checked_locations", []))
             for r in range(step_count - 1):
-                if BASE_LOCATION_ID + r * STRIDE + self.goal_n in checked:
+                if win_step_location_id(r + 1) in checked:
                     self.scene.mark_done()
 
-            goal_str = GOAL_NAMES.get(goal_value, "uranium")
+            goal_str = f"{GOAL_NAMES.get(goal_value, 'uranium')}:{self.keys_mode}"   # ex. "uranium:1", relu par le C#
+            self.skillpoint_price = int(slot_data.get("skillpoint_price", 3))   # anciennes seeds : 3
+            self.overpriced_shop = int(slot_data.get("overpriced_shop", 0))     # anciennes seeds : désactivé
             self.session_info = (slot_name, room_name, goal_str)
             asyncio.create_task(
                 send_session_info_to_game(slot_name, room_name, goal_str, str(self.scene), self)
@@ -193,6 +214,10 @@ class CloneDroneContext(CommonContext):
 
         elif cmd == "ReceivedItems":
             asyncio.create_task(send_pending_items_to_game(self))
+
+    def keys_received(self) -> int:
+        """Nombre de "Progressive Key" reçues."""
+        return sum(1 for n in self.items_received if self.item_names.lookup_in_game(n.item) == KEY_ITEM)
 
     def storage_key(self, name: str) -> str:
         return f"CloneDrone_{self.team}_{self.slot}_{name}"
@@ -230,7 +255,9 @@ async def send_used_to_game(ctx):
 
 
 async def send_session_info_to_game(slot: str, room: str, goal: str, scene: str, ctx=None):
-    payload = f"SESSION:{slot}|{room}|{goal}|{scene}\n"
+    price = getattr(ctx, "skillpoint_price", 3) if ctx is not None else 3
+    overpriced = getattr(ctx, "overpriced_shop", 0) if ctx is not None else 0
+    payload = f"SESSION:{slot}|{room}|{goal}|{scene}|{price}|{overpriced}\n"
     while True:
         try:
             reader, writer = await asyncio.open_connection('127.0.0.1', 38282)
@@ -312,18 +339,22 @@ async def handle_game_check(reader, writer, ctx: CloneDroneContext):
              await bump_storage(ctx, key)
 
     elif message.startswith("BUY:"):
-        # Achat d'une upgrade dans la boutique : "BUY:<UpgradeType>:<niveau>". Le check est relatif au step en cours.
+        # Achat d'une upgrade dans la boutique : "BUY:<id>:<niveau>" où <id> = ID du niveau (UpgradesClass côté C#, UPGRADE_LEVEL_IDS).
+        # Le niveau est alors redondant. Sans ID connu, le mod envoie "BUY:<UpgradeType>:<niveau>". Le check est relatif au step en cours.
         parts = message.split(":")
         if len(parts) == 3 and parts[2].isdigit() and ctx.scene is not None and not ctx.scene.complete:
             step = ctx.scene.finished + 1
-            loc_id = upgrade_location_id(step, parts[1], int(parts[2]))
+            if parts[1].isdigit():
+                loc_id = upgrade_location_id_by_level_id(step, int(parts[1]))
+            else:
+                loc_id = upgrade_location_id(step, parts[1], int(parts[2]))
             if loc_id and ctx.server and ctx.slot and loc_id in ctx.server_locations:
                 await ctx.check_locations([loc_id])
 
     elif message.isdigit():
         # Le mod envoie juste le niveau gagné
         level = int(message)
-        loc_ids, victory, changed = resolve_check(ctx.scene, ctx.goal_n, level)
+        loc_ids, victory, changed = resolve_check(ctx.scene, ctx.goal_n, level, ctx.keys_mode, ctx.keys_received())
 
         to_check = [i for i in loc_ids if i in ctx.server_locations]
         if to_check and ctx.server and ctx.slot:
@@ -335,7 +366,7 @@ async def handle_game_check(reader, writer, ctx: CloneDroneContext):
             logger.info("Objectif atteint ! Victoire validée.")
 
         # Resync : le jeu doit repartir sur une nouvelle partie
-        if ctx.scene is not None and (changed or level > ctx.goal_n):
+        if ctx.scene is not None and (changed or (level > ctx.goal_n and ctx.keys_mode == 0)):
             await send_raw_to_game(f"SCENE:{ctx.scene}\n")
 
 

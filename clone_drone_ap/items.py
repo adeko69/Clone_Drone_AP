@@ -10,33 +10,36 @@ class ItemData(NamedTuple):
 
 BASE_ITEM_ID = 71000
 
+# Tous les items qui débloquent une upgrade sont "progression" : les règles d'accès des achats (logic.py) les exigent,
+# et Archipelago ne compte que les items progression dans ses règles (state.count / state.has).
 item_table: Dict[str, ItemData] = {
-    "BlockArrows": ItemData(BASE_ITEM_ID + 1, ItemClassification.useful),
+    "BlockArrows": ItemData(BASE_ITEM_ID + 1, ItemClassification.progression),
     "EnergyCapacity": ItemData(BASE_ITEM_ID + 2, ItemClassification.progression),
-    "EnergyRecharge": ItemData(BASE_ITEM_ID + 3, ItemClassification.useful),
+    "EnergyRecharge": ItemData(BASE_ITEM_ID + 3, ItemClassification.progression),
     "KickUnlock": ItemData(BASE_ITEM_ID + 4, ItemClassification.progression),
     "KickPower+GetUp": ItemData(BASE_ITEM_ID + 5, ItemClassification.progression),
     "BowUnlock": ItemData(BASE_ITEM_ID + 6, ItemClassification.progression),
-    "ArrowWidth": ItemData(BASE_ITEM_ID + 7, ItemClassification.useful),
-    "AimTime": ItemData(BASE_ITEM_ID + 8, ItemClassification.useful),
-    "FireArrow": ItemData(BASE_ITEM_ID + 9, ItemClassification.useful),
+    "ArrowWidth": ItemData(BASE_ITEM_ID + 7, ItemClassification.progression),
+    "AimTime": ItemData(BASE_ITEM_ID + 8, ItemClassification.progression),
+    "FireArrow": ItemData(BASE_ITEM_ID + 9, ItemClassification.progression),
     "Jetpack": ItemData(BASE_ITEM_ID + 10, ItemClassification.progression),
     "Clone": ItemData(BASE_ITEM_ID + 11, ItemClassification.progression),
-    "Armor+Repair": ItemData(BASE_ITEM_ID + 12, ItemClassification.useful),
+    "Armor+Repair": ItemData(BASE_ITEM_ID + 12, ItemClassification.progression),
     "Progressive Hammer": ItemData(BASE_ITEM_ID + 13, ItemClassification.progression), 
-    "FireSword": ItemData(BASE_ITEM_ID + 14, ItemClassification.useful),
-    "FireHammer+FireSpear": ItemData(BASE_ITEM_ID + 15, ItemClassification.useful),
+    "FireSword": ItemData(BASE_ITEM_ID + 14, ItemClassification.progression),
+    "FireHammer+FireSpear": ItemData(BASE_ITEM_ID + 15, ItemClassification.progression),
     "SpearUnlock": ItemData(BASE_ITEM_ID + 16, ItemClassification.progression),
-    "SpearShield+ShieldBash": ItemData(BASE_ITEM_ID + 17, ItemClassification.useful),
-    "FireBreath+FireResistance": ItemData(BASE_ITEM_ID + 18, ItemClassification.useful),
+    "SpearShield+ShieldBash": ItemData(BASE_ITEM_ID + 17, ItemClassification.progression),
+    "FireBreath+FireResistance": ItemData(BASE_ITEM_ID + 18, ItemClassification.progression),
     "NextUpgradeFree": ItemData(BASE_ITEM_ID + 19, ItemClassification.filler),
-    "Riding": ItemData(BASE_ITEM_ID + 20, ItemClassification.useful),
+    "Riding": ItemData(BASE_ITEM_ID + 20, ItemClassification.progression),
 }
 
-for i in range(1, 4):
+MAX_SKILLPOINT_PRICE = 5
+
+for i in range(1, MAX_SKILLPOINT_PRICE + 1):
     item_table[f"ShopDiscount_{i}"] = ItemData(BASE_ITEM_ID + 20 + i, ItemClassification.progression)
 
-# Épée : n'entre dans le pool que si elle n'est pas l'arme de départ (voir create_items dans __init__.py)
 item_table["SwordUnlock"] = ItemData(BASE_ITEM_ID + 63, ItemClassification.progression)
 
 # --- Items groupés -> items séparés (option "ungroup_upgrade") ---
@@ -103,3 +106,15 @@ def shop_discount_step_name(step: int) -> str:
 
 for _step in range(1, MAX_STEPS + 1):
     item_table[shop_discount_step_name(_step)] = ItemData(BASE_ITEM_ID + 100 * _step + 66, ItemClassification.progression)
+
+
+# --- Multi-Step Keys ---
+# Une seule clé progressive : la clé n est posée dans le step n (voir _plan_keys). Pas de copie par step.
+# Le nom doit correspondre EXACTEMENT à celui testé côté client.py et Class1.cs (ap_grant_item).
+KEY_ITEM = "Progressive Key"
+item_table[KEY_ITEM] = ItemData(BASE_ITEM_ID + 68, ItemClassification.progression)
+
+
+def key_count(steps: int, mode: int) -> int:
+    """mode 0 = aucune clé, 1 = une par step sauf le dernier, 2 = une par step."""
+    return {0: 0, 1: max(0, steps - 1), 2: steps}[mode]

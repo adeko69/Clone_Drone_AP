@@ -6,6 +6,7 @@ Importé par __init__.py (génération) et par client.py (repli pour les ancienn
 # --- X : scénarios ---
 SCENARIO_NORMAL, SCENARIO_INFERNO, SCENARIO_SPRINTER = 0, 1, 2
 SCENARIO_RAPTOR, SCENARIO_RANDOM, SCENARIO_ARMOR = 3, 4, 5
+SCENARIO_LEVELUP, SCENARIO_EASYMODE = 6, 7
 
 # --- Y : armes de départ ---
 WEAPON_SWORD, WEAPON_BOW, WEAPON_HAMMER, WEAPON_SPEAR = 0, 1, 2, 3
