@@ -72,7 +72,7 @@ namespace CloneDroneAP
             public const byte Last = (byte)UpgradesClass.SwordUnlock;
 
             // UpgradeType du jeu -> ses niveaux, dans l'ordre (index 0 = niveau 1)
-            private static readonly Dictionary<UpgradeType, UpgradesClass[]> ByType = new Dictionary<UpgradeType, UpgradesClass[]>
+            public static readonly Dictionary<UpgradeType, UpgradesClass[]> ByType = new Dictionary<UpgradeType, UpgradesClass[]>
         {
             { UpgradeType.BlockArrows, new[] { UpgradesClass.BlockArrows_1, UpgradesClass.BlockArrows_2, UpgradesClass.BlockArrows_3 } },
             { UpgradeType.EnergyCapacity, new[] { UpgradesClass.EnergyCapacity_1, UpgradesClass.EnergyCapacity_2, UpgradesClass.EnergyCapacity_3 } },
@@ -166,6 +166,8 @@ namespace CloneDroneAP
         // Multi-Step Keys : 0 = non, 1 = sans le dernier step, 2 = avec le dernier step
         public static int KeysMode = 0;
         public static int KeysReceived = 0;
+        // Numéro du step dont le niveau final a été franchi SANS clé (en attente d'une clé). 0 = aucun.
+        public static int LockedStep = 0;
 
         // step : numéro 1-based
         public static bool StepKeyRequired(int step)
@@ -184,13 +186,18 @@ namespace CloneDroneAP
         {
             if (KeysMode == 0 || Scene.Count == 0 || SceneComplete) return;
             if (LevelManager.Instance == null) return;
+
+            // Une clé ne valide QUE le step qui attendait sa clé.
+            // Une clé reçue en récompense du step précédent est juste mémorisée (KeysReceived).
+            if (LockedStep != CurrentStepNumber) return;
+
             int goal = GetGoalLevel();
             if (goal > 0 && LevelManager.Instance.GetNumberOfLevelsWon() >= goal && CanWinCurrentStep())
             {
                 MarkCurrentStepDone();
                 NeedsNewRun = true;
                 ScheduleStepReset();
-                SendCheckToPython(goal);   // Python re-résout : Win Step ou victoire
+                SendCheckToPython(goal);
             }
         }
         public static string CurrentSlotName = "DefaultSlot";
@@ -200,7 +207,7 @@ namespace CloneDroneAP
         public enum Scenario : sbyte
         {
             End = -1,
-            Normal = 0, Inferno, Sprinter, Raptor, Random, Armor, LevelUp, EasyMode
+            Normal = 0, Inferno, Sprinter, Raptor, Random, Armor, LevelUp, EasyMode, Undead
         }
 
         public enum Weapons : byte
@@ -209,13 +216,14 @@ namespace CloneDroneAP
         }
 
         public static List<Scenario> Scene = new List<Scenario>();
+        public static Dictionary<Scenario, byte> Confusion = new Dictionary<Scenario, byte>();   // % de confusion (0, 25, 50, 75) par scénario
         public static List<Weapons> SceneWeapons = new List<Weapons>();
 
         public static bool NeedsNewRun = false;
         public static Plugin Instance;
         private static bool _resetScheduled = false;
 
-        public static bool ScenarioActive(int scenario)
+        public static bool ScenarioActive(byte scenario)
         {
             if (CurrentScenario != (Scenario)scenario) return false;
             GameFlowManager flow = Singleton<GameFlowManager>.Instance;
@@ -251,6 +259,15 @@ namespace CloneDroneAP
                 _resetScheduled = false;
             }
         }
+
+        public static bool isConfusionOk(Scenario scenario)
+        {
+            byte confusion;
+            if (scenario == CurrentScenario) return false;
+            if (!Confusion.TryGetValue(scenario, out confusion) || confusion == 0) return false;
+            return UnityEngine.Random.Range(1, 101) <= confusion;   // Range(int, int) : max exclu -> 1..100
+        }
+
 
         public static int GetGoalLevel()
         {
@@ -360,37 +377,7 @@ namespace CloneDroneAP
             }
         }
 
-        private static readonly Dictionary<UpgradeType, UpgradesClass[]> ByType = new Dictionary<UpgradeType, UpgradesClass[]>
-
-        {
-
-            { UpgradeType.BlockArrows, new[] { UpgradesClass.BlockArrows_1, UpgradesClass.BlockArrows_2, UpgradesClass.BlockArrows_3 } },
-            { UpgradeType.EnergyCapacity, new[] { UpgradesClass.EnergyCapacity_1, UpgradesClass.EnergyCapacity_2, UpgradesClass.EnergyCapacity_3 } },
-            { UpgradeType.EnergyRecharge, new[] { UpgradesClass.EnergyRecharge_1, UpgradesClass.EnergyRecharge_2 } },
-            { UpgradeType.KickUnlock, new[] { UpgradesClass.KickUnlock } },
-            { UpgradeType.KickPower, new[] { UpgradesClass.KickPower } },
-            { UpgradeType.GetUp, new[] { UpgradesClass.GetUp } },
-            { UpgradeType.BowUnlock, new[] { UpgradesClass.BowUnlock } },
-            { UpgradeType.ArrowWidth, new[] { UpgradesClass.ArrowWidth_1, UpgradesClass.ArrowWidth_2 } },
-            { UpgradeType.AimTime, new[] { UpgradesClass.AimTime_1, UpgradesClass.AimTime_2 } },
-            { UpgradeType.FireArrow, new[] { UpgradesClass.FireArrow_1, UpgradesClass.FireArrow_2 } },
-            { UpgradeType.Jetpack, new[] { UpgradesClass.Jetpack_1, UpgradesClass.Jetpack_2 } },
-            { UpgradeType.Clone, new[] { UpgradesClass.Clone } },
-            { UpgradeType.Armor, new[] { UpgradesClass.Armor } },
-            { UpgradeType.Repair, new[] { UpgradesClass.Repair } },
-            { UpgradeType.Hammer, new[] { UpgradesClass.Hammer_1, UpgradesClass.Hammer_2, UpgradesClass.Hammer_3 } },
-            { UpgradeType.FireSword, new[] { UpgradesClass.FireSword_1, UpgradesClass.FireSword_2 } },
-            { UpgradeType.FireHammer, new[] { UpgradesClass.FireHammer } },
-            { UpgradeType.FireSpear, new[] { UpgradesClass.FireSpear } },
-            { UpgradeType.SpearUnlock, new[] { UpgradesClass.SpearUnlock } },
-            { UpgradeType.ShieldSize, new[] { UpgradesClass.ShieldSize } },
-            { UpgradeType.ShieldBash, new[] { UpgradesClass.ShieldBash } },
-            { UpgradeType.FlameBreath, new[] { UpgradesClass.FlameBreath } },
-            { UpgradeType.FireResistance, new[] { UpgradesClass.FireResistance } },
-            { UpgradeType.SummonFlameRaptor, new[] { UpgradesClass.SummonFlameRaptor } },
-            { UpgradeType.SummonSawbladeUnicycle, new[] { UpgradesClass.SummonSawbladeUnicycle } },
-            { UpgradeType.SwordUnlock, new[] { UpgradesClass.SwordUnlock } }
-        };
+        
 
 
 
@@ -398,7 +385,7 @@ namespace CloneDroneAP
 
         {
             UpgradesClass[] levels;
-            if (ByType.TryGetValue(type, out levels) && level >= 1 && level <= levels.Length)
+            if (UpgradeLevels.ByType.TryGetValue(type, out levels) && level >= 1 && level <= levels.Length)
                 return levels[level - 1];
             return UpgradesClass.None;
         }
@@ -407,7 +394,7 @@ namespace CloneDroneAP
 
         public static bool TryGetLevel(UpgradesClass id, out UpgradeType type, out int level)
         {
-            foreach (KeyValuePair<UpgradeType, UpgradesClass[]> pair in ByType)
+            foreach (KeyValuePair<UpgradeType, UpgradesClass[]> pair in UpgradeLevels.ByType)
             {
                 for (int i = 0; i < pair.Value.Length; i++)
                 {
@@ -473,11 +460,129 @@ namespace CloneDroneAP
             return itemName.Substring(0, idx);
         }
 
+        private static readonly MethodInfo _iconRefresh = AccessTools.Method(typeof(UpgradeUIIcon), "refreshDisplay");
+
         public static void RefreshUpgradeShop()
         {
             if (UpgradeManager.Instance != null)
             {
                 UpgradeManager.Instance.RefreshUpgradeStationsVisibility();
+            }
+
+            var events = Singleton<GlobalEventManager>.Instance;
+            if (events != null)
+            {
+                events.Dispatch("AvailableSkillPointsChanged");   // robot : label + animator
+            }
+
+            // Écran d'upgrade déjà ouvert : rafraîchit les icônes sans les reconstruire
+            var root = Singleton<GameUIRoot>.Instance;
+            if (root != null && root.UpgradeUI != null && root.UpgradeUI.IsVisible() && _iconRefresh != null)
+            {
+                foreach (UpgradeUIIcon icon in root.UpgradeUI.GetComponentsInChildren<UpgradeUIIcon>())
+                {
+                    _iconRefresh.Invoke(icon, null);
+                }
+            }
+        }
+
+        public class ApHud : MonoBehaviour
+        {
+            public static ApHud Instance;
+            private Text _text;
+            private bool _initialized = false;
+
+            public static void Create()
+            {
+                if (Instance != null) return;
+                GameObject go = new GameObject("AP_HUD");
+                UnityEngine.Object.DontDestroyOnLoad(go);
+                Instance = go.AddComponent<ApHud>();
+            }
+
+            private void Start()
+            {
+                StartCoroutine(InitializeRoutine());
+            }
+
+            private IEnumerator InitializeRoutine()
+            {
+                // On attend la fin du chargement initial du jeu pour que les polices soient en mémoire
+                yield return new WaitForSeconds(0.5f);
+                Build();
+                _initialized = true;
+            }
+
+            private void Build()
+            {
+                try
+                {
+                    Canvas canvas = gameObject.AddComponent<Canvas>();
+                    canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                    canvas.sortingOrder = 5000;
+
+                    CanvasScaler scaler = gameObject.AddComponent<CanvasScaler>();
+                    scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+                    scaler.referenceResolution = new Vector2(1920f, 1080f);
+                    scaler.matchWidthOrHeight = 0.5f;
+
+                    GameObject label = new GameObject("Label");
+                    label.transform.SetParent(transform, false);
+                    label.AddComponent<CanvasRenderer>();
+
+                    _text = label.AddComponent<Text>();
+
+                    // Recherche sécurisée d'une police déjà chargée par Clone Drone
+                    Font targetFont = null;
+                    Font[] allFonts = Resources.FindObjectsOfTypeAll<Font>();
+                    if (allFonts != null && allFonts.Length > 0)
+                    {
+                        targetFont = allFonts[0];
+                    }
+                    else
+                    {
+                        targetFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
+                    }
+
+                    _text.font = targetFont;
+                    _text.fontSize = 22;
+                    _text.alignment = TextAnchor.UpperLeft;
+                    _text.color = Color.white;
+                    _text.raycastTarget = false;
+
+                    label.AddComponent<Outline>();
+
+                    RectTransform rt = _text.rectTransform;
+                    rt.anchorMin = new Vector2(0f, 1f);
+                    rt.anchorMax = new Vector2(0f, 1f);
+                    rt.pivot = new Vector2(0f, 1f);
+                    rt.anchoredPosition = new Vector2(30f, -30f);
+                    rt.sizeDelta = new Vector2(800f, 200f);
+
+                    Plugin.Log.LogInfo("[AP HUD] Initialisé avec la police : " + (targetFont != null ? targetFont.name : "Aucune"));
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.Log.LogError("[AP HUD] Erreur durant le Build : " + ex.Message);
+                }
+            }
+
+            private void Update()
+            {
+                if (!_initialized || _text == null) return;
+
+                string levelId = "Menu";
+                LevelManager lm = Singleton<LevelManager>.Instance;
+                if (lm != null && lm.HasAnyLevelLoaded())
+                {
+                    levelId = lm.GetCurrentLevelID();
+                    if (string.IsNullOrEmpty(levelId))
+                    {
+                        levelId = lm.GetLastSpawnedLevelID() ?? "Inconnu";
+                    }
+                }
+
+                _text.text = levelId + "  Step " + Plugin.CurrentStepNumber + "  Keys " + Plugin.KeysReceived;
             }
         }
 
@@ -734,6 +839,7 @@ namespace CloneDroneAP
                 if (Scene[i] != Scenario.End)
                 {
                     Scene[i] = Scenario.End;
+                    LockedStep = 0;            // <-- ajout
                     RefreshUpgradeShop();
                     return true;
                 }
@@ -906,7 +1012,7 @@ namespace CloneDroneAP
                 {
                     LocalChecks[i] = false;
                 }
-
+                ApHud.Create();
                 StartTcpServer();
             }
             catch (System.Exception ex)
@@ -1067,7 +1173,12 @@ namespace CloneDroneAP
 
             //if(Singleton<CharacterTracker>.Instance.GetPlayer() != null)　ApplyArmorToSpecificPart(Singleton<CharacterTracker>.Instance.GetPlayer(), MechBodyPartType.Spine);
             //if(Singleton<CharacterTracker>.Instance.GetPlayer() != null && Singleton<CharacterTracker>.Instance.GetPlayer().IsAlive())  ArmorManager.Instance.ApplyArmorTo(Singleton<CharacterTracker>.Instance.GetPlayer(), forceGiveArmor: true);
-            if (player == null) player = Singleton<CharacterTracker>.Instance.GetPlayer();
+            if (player == null)
+            {
+                CharacterTracker tracker = Singleton<CharacterTracker>.Instance;
+                if (tracker != null) player = tracker.GetPlayer();
+            }
+
 
 
             if (InfiniteArmor_left != 0 && player != null && player.IsAlive() && Singleton<GameFlowManager>.Instance.IsInCombat())
@@ -1108,14 +1219,15 @@ namespace CloneDroneAP
                     {
                         CurrentSlotName = parts[0].Trim();
                         CurrentRoomName = parts[1].Trim();
-                        // "uranium:1" : objectif + mode des clés (ancien format "uranium" accepté)
                         string[] goalParts = parts[2].Trim().ToLower().Split(':');
                         CurrentGoal = goalParts[0];
                         int sessionKeysMode;
                         KeysMode = (goalParts.Length > 1 && int.TryParse(goalParts[1], out sessionKeysMode))
                             ? Mathf.Clamp(sessionKeysMode, 0, 2)
                             : 0;
-                        KeysReceived = 0;   // le client renvoie tous les items après SESSION
+                        KeysReceived = 0;
+                        KeysReceived = 0;
+                        LockedStep = 0;
                         int sessionPrice;
                         MaxShopDiscount = (parts.Length >= 5 && int.TryParse(parts[4].Trim(), out sessionPrice))
                             ? Mathf.Clamp(sessionPrice, 1, 5)
@@ -1125,6 +1237,17 @@ namespace CloneDroneAP
                             ? (byte)Mathf.Min((int)sessionOverpriced, 10)
                             : (byte)0;
                         OverpricedShop_map.Clear();
+                        Confusion.Clear();
+                        if (parts.Length >= 7)
+                        {
+                            // "25,0,50,0,0,75,0,0" : Inferno..Undead dans l'ordre de l'enum
+                            string[] conf = parts[6].Trim().Split(',');
+                            for (int i = 0; i < conf.Length && i < 8; i++)
+                            {
+                                byte c;
+                                if (byte.TryParse(conf[i].Trim(), out c)) Confusion[(Scenario)(i + 1)] = (byte)Mathf.Min((int)c, 75);
+                            }
+                        }
                         LoadScene(parts.Length >= 4 ? parts[3] : "");
                         StepUnlockedUpgrades.Clear();
                         UnlockedUpgrades.Clear();
@@ -1268,10 +1391,7 @@ namespace CloneDroneAP
             if (itemName.StartsWith("ShopDiscount"))
             {
                 ShopPriceReduction++;
-                if (UpgradeManager.Instance != null)
-                {
-                    UpgradeManager.Instance.RefreshUpgradeStationsVisibility();
-                }
+                RefreshUpgradeShop();
                 return;
             }
 
@@ -1279,10 +1399,7 @@ namespace CloneDroneAP
             {
                 TotalFreeUpgradesReceived++;
                 RecalculateFreeUpgrades();
-                if (UpgradeManager.Instance != null)
-                {
-                    UpgradeManager.Instance.RefreshUpgradeStationsVisibility();
-                }
+                RefreshUpgradeShop();
                 return;
             }
 
@@ -1399,12 +1516,11 @@ namespace CloneDroneAP
     [HarmonyPatch(typeof(FirstPersonMover), "initializeCharacterModelAndUpgrades")]
     public class EnemyAlwaysRideRaptorPatch
     {
-        private static bool _isSpawningMount = false;
+        public static bool isSpawningMount = false;
 
         static void Postfix(FirstPersonMover __instance)
         {
-            if (Plugin.CurrentScenario != (Plugin.Scenario)3) return;
-            if (_isSpawningMount || __instance == null || !__instance.IsAlive())
+            if (isSpawningMount || __instance == null || !__instance.IsAlive())
                 return;
 
             if (__instance.IsMainPlayer() || __instance.IsPlayerTeam || __instance.IsNeutral)
@@ -1414,6 +1530,10 @@ namespace CloneDroneAP
                 return;
 
             if (__instance.IsRidingOtherCharacter() || __instance.HasCharacterRiding())
+                return;
+
+            // Scénario Raptor actif, ou confusion Raptor qui passe le test (ne s'applique jamais si Raptor est déjà le scénario courant)
+            if (Plugin.CurrentScenario != Plugin.Scenario.Raptor && !Plugin.isConfusionOk(Plugin.Scenario.Raptor))
                 return;
 
             __instance.StartCoroutine(SpawnAndMountRaptorRoutine(__instance));
@@ -1428,7 +1548,7 @@ namespace CloneDroneAP
                 yield break;
 
             Transform mountTransform = null;
-            _isSpawningMount = true;
+            isSpawningMount = true;
             try
             {
                 float randomRoll = UnityEngine.Random.Range(0f, 100f);
@@ -1446,7 +1566,7 @@ namespace CloneDroneAP
             }
             finally
             {
-                _isSpawningMount = false;
+                isSpawningMount = false;
             }
 
             if (mountTransform == null) yield break;
@@ -1540,7 +1660,7 @@ namespace CloneDroneAP
 
                 if (locked)
                 {
-                    // Pas de clé : rien n'est validé, la run continue comme si de rien n'était
+                    Plugin.LockedStep = Plugin.CurrentStepNumber;   // <-- ajout
                     Plugin.NeedsNewRun = false;
                 }
                 else if (totalLevelsWon > goalLevel)
@@ -1641,12 +1761,21 @@ namespace CloneDroneAP
     [HarmonyPatch(typeof(FirstPersonMover), "RefreshUpgrades")]
     public class EnemyFireVariantPatch
     {
+        // Résultat du test de confusion mémorisé par ennemi (RefreshUpgrades est appelé plusieurs fois)
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<FirstPersonMover, object> _confusionRolls =
+            new System.Runtime.CompilerServices.ConditionalWeakTable<FirstPersonMover, object>();
+
         static void Prefix(FirstPersonMover __instance)
         {
             if (__instance == null || !__instance.IsAlive() || __instance.IsMainPlayer() || __instance.IsPlayerTeam)
                 return;
 
-            if (!Plugin.IsInfernoActive) return;
+            // Inferno actif, ou confusion Inferno qui passe le test (une seule fois par ennemi)
+            if (!Plugin.IsInfernoActive)
+            {
+                bool confused = (bool)_confusionRolls.GetValue(__instance, _ => Plugin.isConfusionOk(Plugin.Scenario.Inferno));
+                if (!confused) return;
+            }
 
             UpgradeCollection upgrades = AccessTools.Field(typeof(FirstPersonMover), "_upgradeCollection")?.GetValue(__instance) as UpgradeCollection;
 
@@ -1887,6 +2016,10 @@ namespace CloneDroneAP
                 { EnemyType.Bowman2, EnemyType.Bowman3 },
                 { EnemyType.Bowman3, EnemyType.Bowman4 },
                 { EnemyType.Bowman4, EnemyType.Bowman5 },
+                { EnemyType.Zombie1, EnemyType.Zombie2 },
+                { EnemyType.Zombie2, EnemyType.Zombie3 },
+                { EnemyType.Zombie3, EnemyType.Zombie4 },
+                { EnemyType.ZombieArcher1, EnemyType.ZombieArcher2 },
                 { EnemyType.Swordsman1, EnemyType.Swordsman2 },
                 { EnemyType.Swordsman2, EnemyType.Swordsman3 },
                 { EnemyType.Swordsman3, EnemyType.Swordsman4 },
@@ -1917,6 +2050,10 @@ namespace CloneDroneAP
                 { EnemyType.Bowman2, EnemyType.Bowman1 },
                 { EnemyType.Bowman3, EnemyType.Bowman2 },
                 { EnemyType.Bowman4, EnemyType.Bowman3 },
+                { EnemyType.Zombie2, EnemyType.Zombie1 },
+                { EnemyType.Zombie3, EnemyType.Zombie2 },
+                { EnemyType.Zombie4, EnemyType.Zombie3 },
+                { EnemyType.ZombieArcher2, EnemyType.ZombieArcher1 },
                 { EnemyType.Swordsman2, EnemyType.Swordsman1 },
                 { EnemyType.Swordsman3, EnemyType.Swordsman2 },
                 { EnemyType.Swordsman4, EnemyType.Swordsman3 },
@@ -1938,6 +2075,42 @@ namespace CloneDroneAP
                 { EnemyType.FleetCaptain, EnemyType.FleetOverseer },
                 { EnemyType.BusinessJetpack, EnemyType.BusinessSword },
                 { EnemyType.BusinessHammer, EnemyType.BusinessJetpack }
+            };
+
+        private static readonly Dictionary<EnemyType, EnemyType> UndeadMap =
+            new Dictionary<EnemyType, EnemyType>()
+            {
+                { EnemyType.Bowman5, EnemyType.ZombieArcher2 },
+                { EnemyType.Bowman2, EnemyType.ZombieArcher1 },
+                { EnemyType.Bowman1, EnemyType.ZombieArcher1 },
+                { EnemyType.Bowman3, EnemyType.ZombieArcher2 },
+                { EnemyType.Bowman4, EnemyType.ZombieArcher2 },
+                { EnemyType.Swordsman1, EnemyType.Zombie1 },
+                { EnemyType.Swordsman2, EnemyType.Zombie1 },
+                { EnemyType.Swordsman3, EnemyType.Zombie2 },
+                { EnemyType.Swordsman4, EnemyType.Zombie3 },
+                { EnemyType.Swordsman5, EnemyType.Zombie4 },
+                { EnemyType.Bowman4_Stationary, EnemyType.ZombieArcher2 },
+                { EnemyType.LaserRaptor, EnemyType.ZombieRaptor },
+                { EnemyType.FireRaptor, EnemyType.ZombieRaptor },
+                { EnemyType.Hammer1, EnemyType.Zombie1 },
+                { EnemyType.Hammer2, EnemyType.Zombie2 },
+                { EnemyType.Hammer3, EnemyType.Zombie3 },
+                { EnemyType.Hammer5, EnemyType.Zombie4 },
+                { EnemyType.Spear5, EnemyType.Zombie4 },
+                { EnemyType.Spear1, EnemyType.Zombie1 },
+                { EnemyType.Spear2, EnemyType.Zombie2 },
+                { EnemyType.Spear3, EnemyType.Zombie3 },
+                { EnemyType.Spear4, EnemyType.Zombie4 },
+                { EnemyType.Sprinter2, EnemyType.ZombieJetpack1 },
+                { EnemyType.Sprinter1, EnemyType.ZombieJetpack1 },
+                { EnemyType.FleetCaptain, EnemyType.ZombieFleetCaptain },
+                { EnemyType.FleetCaptain2, EnemyType.ZombieFleetCaptain },
+                { EnemyType.FleetCaptain3, EnemyType.ZombieFleetCaptain },
+                { EnemyType.FleetCaptain4, EnemyType.ZombieFleetCaptain },
+                { EnemyType.FleetCaptain5, EnemyType.ZombieFleetCaptain },
+                { EnemyType.BusinessJetpack, EnemyType.ZombieJetpack1 },
+                { EnemyType.BusinessHammer, EnemyType.ZombieJetpack1 }
             };
 
 
@@ -1977,10 +2150,21 @@ namespace CloneDroneAP
         };
 
 
+        private static readonly Plugin.Scenario[] HandledScenarios =
+        {
+            Plugin.Scenario.Sprinter, Plugin.Scenario.Random,
+            Plugin.Scenario.LevelUp, Plugin.Scenario.EasyMode, Plugin.Scenario.Undead
+        };
+
+        private static bool IsMount(EnemyType type)
+        {
+            return type == EnemyType.FireRaptor || type == EnemyType.LaserRaptor || type == EnemyType.ZombieRaptor;
+        }
+
         static void Prefix(EnemyFactory __instance, ref Transform enemyPrefab)
         {
-            if (Plugin.CurrentScenario != (Plugin.Scenario)2 && Plugin.CurrentScenario != (Plugin.Scenario)4 && Plugin.CurrentScenario != Plugin.Scenario.EasyMode && Plugin.CurrentScenario != Plugin.Scenario.LevelUp) return;
             if (enemyPrefab == null) return;
+            
 
             Character charComp = enemyPrefab.GetComponent<Character>();
             if (charComp == null) return;
@@ -1988,31 +2172,56 @@ namespace CloneDroneAP
             if (charComp.IsPlayerTeam || charComp.IsNeutral) return;
             if (LevelManager.Instance == null) return;
 
+            // Scénario courant + confusions qui passent le test (une fois par ennemi)
+            bool isMount = IsMount(charComp.CharacterType);
+
+            List<Plugin.Scenario> active = new List<Plugin.Scenario>();
+            foreach (Plugin.Scenario scenario in HandledScenarios)
+            {
+                // Une monture ne subit que LevelUp / EasyMode (Fire <-> Laser reste une monture valide)
+                if (isMount && scenario != Plugin.Scenario.LevelUp && scenario != Plugin.Scenario.EasyMode) continue;
+
+                if (scenario == Plugin.CurrentScenario || Plugin.isConfusionOk(scenario)) active.Add(scenario);
+            }
+            if (active.Count == 0) return;
+
             EnemyType targetType = charComp.CharacterType;
             int endLevel = LevelManager.Instance.GetNumberOfLevelsWon();
 
-            if (Plugin.CurrentScenario == Plugin.Scenario.LevelUp || Plugin.CurrentScenario == Plugin.Scenario.EasyMode)
+            foreach (Plugin.Scenario scenario in active)
             {
-                Dictionary<EnemyType, EnemyType> takeFrom = Plugin.CurrentScenario == Plugin.Scenario.LevelUp ? LevelUpMap : EasyModeMap;
-                if (takeFrom.TryGetValue(charComp.CharacterType, out EnemyType mappedType))
+                ApplyScenario(scenario, ref targetType, endLevel);
+            }
+
+            if (charComp.CharacterType != targetType)
+            {
+                Character newPrefabChar = __instance.GetEnemyPrefab(targetType);
+                if (newPrefabChar != null)
+                {
+                    enemyPrefab = newPrefabChar.transform;
+                }
+            }
+        }
+
+        private static void ApplyScenario(Plugin.Scenario scenario, ref EnemyType targetType, int endLevel)
+        {
+            if (scenario == Plugin.Scenario.Undead || scenario == Plugin.Scenario.LevelUp || scenario == Plugin.Scenario.EasyMode)
+            {
+                Dictionary<EnemyType, EnemyType> takeFrom =
+                    scenario == Plugin.Scenario.Undead ? UndeadMap :
+                    scenario == Plugin.Scenario.LevelUp ? LevelUpMap : EasyModeMap;
+
+                if (takeFrom.TryGetValue(targetType, out EnemyType mappedType))
                 {
                     targetType = mappedType;
                 }
-                else targetType = charComp.CharacterType;
             }
-            else if (Plugin.CurrentScenario == (Plugin.Scenario)2)
+            else if (scenario == Plugin.Scenario.Sprinter)
             {
-
-
                 float chanceSprinter2 = Mathf.Floor(endLevel / 3f) * 1f;
-
                 float chanceSprinterBowman = Mathf.Floor(endLevel / 5f) * 2f;
 
-                float chanceSprinter1 = Mathf.Max(0f, 100f - (chanceSprinter2 + chanceSprinterBowman));
-
                 float randomRoll = UnityEngine.Random.Range(0f, 100f);
-
-                targetType = EnemyType.Sprinter1;
 
                 if (randomRoll < chanceSprinterBowman)
                 {
@@ -2027,29 +2236,17 @@ namespace CloneDroneAP
                     targetType = EnemyType.Sprinter1;
                 }
             }
-
-            else if (Plugin.CurrentScenario == (Plugin.Scenario)4)
+            else if (scenario == Plugin.Scenario.Random)
             {
                 EnemyType[] enemies = endLevel > 13
                     ? RandomEnemiesLate
                     : RandomEnemies;
 
-                int randomRoll = UnityEngine.Random.Range(0, enemies.Length);
-                targetType = enemies[randomRoll];
-            }
-
-
-
-            if (charComp.CharacterType != targetType)
-            {
-                Character newPrefabChar = __instance.GetEnemyPrefab(targetType);
-                if (newPrefabChar != null)
-                {
-                    enemyPrefab = newPrefabChar.transform;
-                }
+                targetType = enemies[UnityEngine.Random.Range(0, enemies.Length)];
             }
         }
     }
+
 
     [HarmonyPatch(typeof(TitleScreenUI), "OnWorkshopBrowserButtonClicked")]
     public class BlockWorkshopClickPatch
@@ -2087,9 +2284,15 @@ namespace CloneDroneAP
     {
         static void Prefix(FirstPersonMover __instance)
         {
-            if (!Plugin.ScenarioActive(5)) return;
             if (__instance == null || !__instance.IsAlive()) return;
             if (__instance.IsMainPlayer() || __instance.IsPlayerTeam || __instance.IsNeutral) return;
+
+            // Scénario Armor actif, ou confusion Armor qui passe le test
+            if (!Plugin.ScenarioActive(5))
+            {
+                GameFlowManager flow = Singleton<GameFlowManager>.Instance;
+                if (flow == null || flow.IsOnTitleScreen() || !Plugin.isConfusionOk(Plugin.Scenario.Armor)) return;
+            }
 
             UpgradeCollection upgrades = AccessTools.Field(typeof(FirstPersonMover), "_upgradeCollection")?.GetValue(__instance) as UpgradeCollection;
             if (upgrades == null) return;

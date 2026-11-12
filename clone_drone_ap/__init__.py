@@ -14,7 +14,7 @@ from .locations import (
 from .upgrade_data import split_step_suffix, item_blocked_at, win_step_name, upgrade_location_id
 from .regions import create_regions
 from .rules import set_rules
-from .options import CloneDroneOptions, Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode
+from .options import CloneDroneOptions, Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode, Undead, ConfusionInferno, ConfusionSprinter, ConfusionRaptor, ConfusionTotallyRandom, ConfusionArmor, ConfusionLevelUp, ConfusionEasyMode, ConfusionUndead
 from .steps import plan_step_items, GLOBAL_PRIORITY
 from .logic import stuck_prefills
 from worlds.LauncherComponents import Component, components, Type, launch_subprocess
@@ -24,6 +24,12 @@ from .scenarios import *
 # Part des items "(Step N)" qui peuvent atterrir dans le monde des autres joueurs (le reste est verrouillé ici).
 # Seulement en multiworld : en solo il n'y a pas d'autre monde, tout doit rester dans les locations du step.
 INTERWORLD_RATIO = 0.70
+
+# Option "Shop Discount Chance Generation" / "Step Shop Discount Per Step" (valeurs de options.py)
+SHOP_GEN_RANDOM = 1
+# Option "Step Key Location" (valeurs de options.py)
+KEY_LOC_LOCAL, KEY_LOC_NOT_LEVEL_LOCAL, KEY_LOC_NOT_LEVEL_ANYWHERE, KEY_LOC_ANYWHERE = 0, 1, 2, 3
+STEP_DISCOUNT_NEVER, STEP_DISCOUNT_BEFORE, STEP_DISCOUNT_AFTER, STEP_DISCOUNT_ALWAYS = 0, 1, 2, 3
 
 
 # Places laissées libres en mode Per Step (en plus des items globaux) pour que les fillers aient de la place
@@ -55,7 +61,8 @@ class CloneDroneWeb(WebWorld):
     # Chaque groupe devient un onglet (Options Creator du lanceur, page d'options du site).
     # Les options hors groupe restent dans "Game Options". Le YAML ne change pas.
     option_groups = [
-        OptionGroup("Scenario", [Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode]),
+        OptionGroup("Scenario", [Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode, Undead]),
+        OptionGroup("Confusion", [ConfusionInferno, ConfusionSprinter, ConfusionRaptor, ConfusionTotallyRandom, ConfusionArmor, ConfusionLevelUp, ConfusionEasyMode, ConfusionUndead]),
     ]
 
 
@@ -78,7 +85,7 @@ class CloneDroneWorld(World):
             bool(o.step_is_step_locked.value)
             and int(o.upgrade_mode.value) in (UPGRADE_PER_STEP_GROUPED, UPGRADE_PER_STEP_UNGROUPED)
         )
-        flags = (o.normal, o.inferno, o.jetpack, o.raptor, o.random, o.armor, o.levelup, o.easymode)
+        flags = (o.normal, o.inferno, o.jetpack, o.raptor, o.random, o.armor, o.levelup, o.easymode, o.undead)
         if not any(f.value for f in flags):
             o.normal.value = 1
 
@@ -91,9 +98,10 @@ class CloneDroneWorld(World):
         if o.armor.value:    scenarios.append(SCENARIO_ARMOR)
         if o.levelup.value:  scenarios.append(SCENARIO_LEVELUP)
         if o.easymode.value: scenarios.append(SCENARIO_EASYMODE)
+        if o.undead.value:   scenarios.append(SCENARIO_UNDEAD)
 
         scenario_values = generate_scene(scenarios, o.steps.value, self.random)
-        self.weapons = generate_weapons(int(o.randomize_starting_weapon.value), o.steps.value, self.random)
+        self.weapons = self._draw_weapons()
         self.scene = format_scene(scenario_values, self.weapons)   # "X:Y;X:Y;..."
         # Pas de check d'achat pour l'arme de départ de chaque step (déjà possédée) : épée, arc, marteau niv. I, lance
         self.skipped_checks = {
@@ -103,10 +111,36 @@ class CloneDroneWorld(World):
 
         # Multi-Step Keys
         self.keys_mode = int(o.multi_step_keys.value)
+        self.key_location_mode = int(o.step_key_location.value)
+        # Les clés qui passent par le fill ne doivent pas tomber dans les checks niveaux (modes 1 et 2)
+        self.keys_avoid_levels = self.key_location_mode in (KEY_LOC_NOT_LEVEL_LOCAL, KEY_LOC_NOT_LEVEL_ANYWHERE)
         self.key_total = key_count(o.steps.value, self.keys_mode)
         self.key_steps_placed = set()        # steps dont la clé est posée dans le step lui-même
         self.missing_keys = self.key_total   # clés qui n'ont pas pu être posées dans leur step (retombent dans le pool)
         self.win_step_locations = {win_step_name(r) for r in range(1, o.steps.value)}
+
+    def _draw_weapons(self) -> list:
+        """Tirage des armes de départ ; sans Bow, on retire jusqu'à obtenir un tirage sans arc (distribution conservée)."""
+        o = self.options
+        mode = int(o.randomize_starting_weapon.value)
+        steps = o.steps.value
+        weapons = generate_weapons(mode, steps, self.random)
+        if mode == WEAPON_MODE_NONE or o.include_bow_in_weapon_randomization.value:
+            return weapons
+
+        bow = {w for w in WEAPON_ITEMS if WEAPON_ITEMS[w] == "BowUnlock"}
+        for _attempt in range(200):
+            if not bow & set(weapons):
+                return weapons
+            weapons = generate_weapons(mode, steps, self.random)
+        # Filet de sécurité : remplace les arcs restants par une autre arme tirée au hasard
+        others = [w for w in WEAPON_ITEMS if w not in bow]
+        return [self.random.choice(others) if w in bow else w for w in weapons]
+
+    # --- Shop Discount : nombre et répartition ---
+    def _shop_discount_count(self) -> int:
+        price = int(self.options.skillpoint_price.value)
+        return price if self.options.additional_shop_discount.value else max(0, price - 1)
 
     def create_item(self, name: str) -> CloneDroneItem:
         data = item_table[name]
@@ -157,6 +191,9 @@ class CloneDroneWorld(World):
                     return True
                 # Une clé dans un "Win Step" = deadlock (ne concerne que les clés retombées dans le pool)
                 if item.name == KEY_ITEM and name in self.win_step_locations:
+                    return False
+                # Modes "Not in level checks" : une clé du pool ne peut pas être sur un check niveau (= ni achat, ni Win Step)
+                if item.name == KEY_ITEM and self.keys_avoid_levels and upgrade is None:
                     return False
                 # Une copie "(Step N)" de ce monde ne peut pas être dans un step > N (elle serait inutilisable)
                 _base, item_step = split_step_suffix(item.name)
@@ -222,9 +259,9 @@ class CloneDroneWorld(World):
             excluded.add("SwordUnlock")
         excluded.add("Clone (All Steps)") 
         excluded.add(KEY_ITEM)   # posées par _plan_keys (les éventuelles absentes sont rajoutées plus bas)
-        # Seuls les ShopDiscount_1..price entrent dans le pool (les autres n'existent pas pour cette seed)
-        price = int(self.options.skillpoint_price.value)
-        excluded.update(f"ShopDiscount_{i}" for i in range(price + 1, MAX_SKILLPOINT_PRICE + 1))
+        # Seuls les ShopDiscount_1..count entrent dans le pool (les autres n'existent pas pour cette seed)
+        discounts = self._shop_discount_count()
+        excluded.update(f"ShopDiscount_{i}" for i in range(discounts + 1, MAX_SKILLPOINT_PRICE + 1))
 
         counts = {
             n: ITEM_COPIES.get(n, 1)
@@ -288,7 +325,7 @@ class CloneDroneWorld(World):
             if step in candidates and name in candidates[step]:
                 candidates[step].remove(name)
 
-        priority = [f"ShopDiscount_{i}" for i in range(1, int(self.options.skillpoint_price.value) + 1)]
+        priority = [f"ShopDiscount_{i}" for i in range(1, self._shop_discount_count() + 1)]
         if step_count > 1:
             priority.insert(0, "Clone (All Steps)")
         for name in consumed:
@@ -358,14 +395,37 @@ class CloneDroneWorld(World):
         by_step = get_level_names_by_step(int(self.options.goal.value), step_count)
         flat = [n for k in range(1, step_count + 1) for n in by_step[k]]   # progression globale de la run
 
-        # Un ShopDiscount par point de skillpoint price, répartis à i/(price+1) de la run
-        # (price = 3 -> 25 %, 50 %, 75 % comme avant)
-        price = int(self.options.skillpoint_price.value)
-        fractions = [i / (price + 1) for i in range(1, price + 1)]
-        names = [f"ShopDiscount_{i}" for i in range(1, price + 1)]
-        result = list(zip(self._pick_proportional(flat, taken, fractions), names))
-        if per_step and step_count > 1:
-            for k in range(1, step_count + 1):
+        count = self._shop_discount_count()
+        names = [f"ShopDiscount_{i}" for i in range(1, count + 1)]
+        picks = []
+        if count:
+            if int(self.options.shop_discount_generation.value) == SHOP_GEN_RANDOM:
+                # Tous les emplacements actifs (niveaux, achats d'upgrade...), pas seulement les niveaux.
+                # Seuls les "Win Step" sont exclus (ils portent l'arme du step suivant / la logique des steps).
+                every = get_active_location_names(int(self.options.goal.value), step_count, self.skipped_checks)
+                free = [n for n in every if n not in taken and n not in self.win_step_locations]
+                picks = self.random.sample(free, min(count, len(free)))
+                taken.update(picks)
+            else:
+                # Un ShopDiscount réparti à i/(count+1) de la run (3 -> 25 %, 50 %, 75 % comme avant)
+                fractions = [i / (count + 1) for i in range(1, count + 1)]
+                picks = self._pick_proportional(flat, taken, fractions)
+            # ShopDiscount_1 = le premier rencontré dans la run (ordre par step, puis niveaux avant achats)
+            picks.sort(key=lambda n: (LOCATION_STEP[n], flat.index(n) if n in flat else len(flat)))
+        result = list(zip(picks, names))
+
+        mode = int(self.options.step_shop_discount_per_step.value)
+        if per_step and step_count > 1 and mode != STEP_DISCOUNT_NEVER:
+            # Step S : celui où l'on trouve le (50 % arrondi au supérieur)-ième Shop Discount
+            half = -(-len(result) // 2)
+            pivot = LOCATION_STEP[result[half - 1][0]] if half >= 1 else 1
+            if mode == STEP_DISCOUNT_BEFORE:
+                steps = range(1, pivot)                # steps 1..S-1 : S exclu, on s'arrête avant
+            elif mode == STEP_DISCOUNT_AFTER:
+                steps = range(1, pivot + 1)            # steps 1..S : S inclus, on s'arrête après
+            else:
+                steps = range(1, step_count + 1)
+            for k in steps:
                 picks = self._pick_proportional(by_step[k], taken, (0.50,))   # un seul, au milieu du step
                 result.extend((loc, shop_discount_step_name(k)) for loc in picks)
         return result
@@ -377,6 +437,8 @@ class CloneDroneWorld(World):
     def _plan_keys(self, taken: set) -> list:
         if not self.key_total:
             return []
+        if self.key_location_mode in (KEY_LOC_NOT_LEVEL_ANYWHERE, KEY_LOC_ANYWHERE):
+            return []   # toutes les clés vont dans le pool : le fill les place (autres mondes compris)
         goal = int(self.options.goal.value)
         steps = int(self.options.steps.value)
         by_step = get_level_names_by_step(goal, steps)
@@ -395,7 +457,9 @@ class CloneDroneWorld(World):
             level_pool = [l for l in levels[start:end] if l not in taken] or [l for l in levels if l not in taken]
             buy_pool = [l for l in purchases[n] if l not in taken]
 
-            if buy_pool and (not level_pool or self.random.random() < KEY_UPGRADE_CHANCE):
+            if self.key_location_mode == KEY_LOC_NOT_LEVEL_LOCAL:
+                candidates = buy_pool   # vide -> la clé retombe dans le pool (règle : jamais sur un check niveau)
+            elif buy_pool and (not level_pool or self.random.random() < KEY_UPGRADE_CHANCE):
                 candidates = buy_pool
             else:
                 candidates = level_pool
@@ -417,11 +481,13 @@ class CloneDroneWorld(World):
         return {
             "goal": int(self.options.goal.value),
             "multi_step_keys": self.keys_mode,
+            "step_key_location": self.key_location_mode,
             "death_link": self.options.death_link.value,
             "scene": self.scene,
             "steps": int(self.options.steps.value),
             "upgrade_mode": int(self.options.upgrade_mode.value),
             "skillpoint_price": self.options.skillpoint_price.value,
+            "shop_discount_count": self._shop_discount_count(),
             "overpriced_shop": int(self.options.overpriced_shop.value),
             "randomize_starting_weapon": int(self.options.randomize_starting_weapon.value),
             "normal": int(self.options.normal.value),
@@ -432,4 +498,13 @@ class CloneDroneWorld(World):
             "armor": int(self.options.armor.value),
             "levelup": int(self.options.levelup.value),
             "easymode": int(self.options.easymode.value),
+            "undead": int(self.options.undead.value),
+            "confusion_inferno": int(self.options.confusion_inferno.value),
+            "confusion_sprinter": int(self.options.confusion_jetpack.value),
+            "confusion_raptor": int(self.options.confusion_raptor.value),
+            "confusion_random": int(self.options.confusion_random.value),
+            "confusion_armor": int(self.options.confusion_armor.value),
+            "confusion_levelup": int(self.options.confusion_levelup.value),
+            "confusion_easymode": int(self.options.confusion_easymode.value),
+            "confusion_undead": int(self.options.confusion_undead.value),
         }

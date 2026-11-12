@@ -54,6 +54,54 @@ class SkillpointPrice(Range):
     range_end = 5
     default = 3
 
+class IncludeBowInWeaponRandomization(Toggle):
+    """
+    Only used with "Randomize Starting Weapon" (Same Per Step / Random By Step).
+    On: the Bow can be drawn as a starting weapon.
+    Off: the Bow is never drawn (0% chance).
+    """
+    display_name = "Include Bow in Weapon Randomization"
+    default = 1
+
+class AdditionalShopDiscount(Toggle):
+    """
+    On: the pool holds as many Shop Discount items as the Skillpoint Price (default behaviour).
+    Off: only (Skillpoint Price - 1) Shop Discount items are generated,
+    so the multiplier can never go down to x1 through discounts alone.
+    """
+    display_name = "Additional Shop Discount"
+    default = 1
+
+class ShopDiscountGeneration(Choice):
+    """
+    Where the Shop Discount items are placed.
+    - Proportional: spread evenly over the whole run (25 %, 50 %, 75 % with 3 discounts).
+    - Random: placed on any random location of the game (levels and upgrade purchases alike).
+    """
+    display_name = "Shop Discount Chance Generation"
+    option_proportional = 0
+    option_random = 1
+    default = 0
+
+class StepShopDiscountPerStep(Choice):
+    """
+    Only used with the Per Step upgrade modes (and more than one step).
+    Controls in which steps a "Shop Discount (Step N)" item is generated.
+    Let H = half of the Shop Discount items, rounded up (5 discounts -> 3, 3 discounts -> 2),
+    and S = the step in which you find the H-th Shop Discount.
+    - Never: no Step Shop Discount at all.
+    - Before 50%: steps 1 to S-1 generate one (step S itself does not), then it stops.
+    - After 50%: steps 1 to S generate one (step S included), then it stops.
+    - Always: every step (default behaviour).
+    """
+    display_name = "Step Shop Discount Per Step"
+    option_never = 0
+    option_before_50_percent = 1
+    option_after_50_percent = 2
+    option_always = 3
+    default = 3
+
+
 class OverpricedShop(Range):
     """
     Make X upgrades being +3 skillpoint. Randomized on every death.
@@ -135,6 +183,69 @@ class EasyMode(Toggle):
     default = 0
 
 
+class Undead(Toggle):
+    """Enemies come back as undead."""
+    display_name = "Undead"
+    default = 0
+
+
+class ConfusionInferno(Range):
+    """Chance (in %, 0 = disabled) of mixing "Inferno" into other scenarios."""
+    display_name = "Confusion Inferno"
+    range_start = 0
+    range_end = 50
+    default = 0
+
+class ConfusionSprinter(Range):
+    """Chance (in %, 0 = disabled) of mixing "Jetpack Everywhere" into other scenarios."""
+    display_name = "Confusion Jetpack Everywhere"
+    range_start = 0
+    range_end = 50
+    default = 0
+
+class ConfusionRaptor(Range):
+    """Chance (in %, 0 = disabled) of mixing "Riding Raptor" into other scenarios."""
+    display_name = "Confusion Riding Raptor"
+    range_start = 0
+    range_end = 50
+    default = 0
+
+class ConfusionTotallyRandom(Range):
+    """Chance (in %, 0 = disabled) of mixing "True Enemy Randomness" into other scenarios."""
+    display_name = "Confusion True Enemy Randomness"
+    range_start = 0
+    range_end = 50
+    default = 0
+
+class ConfusionArmor(Range):
+    """Chance (in %, 0 = disabled) of mixing "Armored" into other scenarios."""
+    display_name = "Confusion Armored"
+    range_start = 0
+    range_end = 50
+    default = 0
+
+class ConfusionLevelUp(Range):
+    """Chance (in %, 0 = disabled) of mixing "Level Up" into other scenarios."""
+    display_name = "Confusion Level Up"
+    range_start = 0
+    range_end = 50
+    default = 0
+
+class ConfusionEasyMode(Range):
+    """Chance (in %, 0 = disabled) of mixing "Easy Mode" into other scenarios."""
+    display_name = "Confusion Easy Mode"
+    range_start = 0
+    range_end = 50
+    default = 0
+
+class ConfusionUndead(Range):
+    """Chance (in %, 0 = disabled) of mixing "Undead" into other scenarios."""
+    display_name = "Confusion Undead"
+    range_start = 0
+    range_end = 50
+    default = 0
+
+
 class MultiStepKeys(Choice):
     """
     Keys required to validate "Win Step".
@@ -150,17 +261,42 @@ class MultiStepKeys(Choice):
     default = 0
 
 
+class StepKeyLocation(Choice):
+    """
+    Only used with Multi-Step Keys. Where the Progressive Keys can be generated.
+    - Everywhere In Local: key N is placed in step N of your own world, on a level or an upgrade purchase (default).
+    - Not In Level Checks In Local: key N is placed in step N of your own world, on upgrade purchases only.
+      If step N has no free purchase left, the key falls back to the pool (never on a level check).
+    - Not In Level Checks Anywhere: keys go to the pool: they can end up in other players' worlds,
+      or on your upgrade purchases, but never on your level checks.
+    - Absolutely Anywhere: keys go to the pool and can be anywhere, level checks included
+      (never on a "Win Step", which would deadlock).
+    Keys placed through the pool are positioned by the fill, which respects the access rules.
+    """
+    display_name = "Step Key Location"
+    option_everywhere_in_local = 0
+    option_not_in_level_checks_in_local = 1
+    option_not_in_level_checks_anywhere = 2
+    option_absolutely_anywhere = 3
+    default = 0
+
+
 @dataclass
 class CloneDroneOptions(PerGameCommonOptions):
     goal: CloneDroneGoal
     death_link: DeathLink
     upgrade_mode: UpgradeMode
     randomize_starting_weapon: RandomizeStartingWeapon
+    include_bow_in_weapon_randomization: IncludeBowInWeaponRandomization
     skillpoint_price: SkillpointPrice
+    additional_shop_discount: AdditionalShopDiscount
+    shop_discount_generation: ShopDiscountGeneration
+    step_shop_discount_per_step: StepShopDiscountPerStep
     overpriced_shop: OverpricedShop
     steps: Steps
     step_is_step_locked: StepIsStepLocked
     multi_step_keys: MultiStepKeys
+    step_key_location: StepKeyLocation
     normal: Normal
     inferno: Inferno
     jetpack: Sprinter
@@ -169,3 +305,12 @@ class CloneDroneOptions(PerGameCommonOptions):
     armor: Armor
     levelup: LevelUp
     easymode: EasyMode
+    undead: Undead
+    confusion_inferno: ConfusionInferno
+    confusion_jetpack: ConfusionSprinter
+    confusion_raptor: ConfusionRaptor
+    confusion_random: ConfusionTotallyRandom
+    confusion_armor: ConfusionArmor
+    confusion_levelup: ConfusionLevelUp
+    confusion_easymode: ConfusionEasyMode
+    confusion_undead: ConfusionUndead

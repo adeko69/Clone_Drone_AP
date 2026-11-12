@@ -8,7 +8,7 @@ from .scenarios import (
     generate_scene,
     SCENARIO_NORMAL, SCENARIO_INFERNO, SCENARIO_SPRINTER,
     SCENARIO_RAPTOR, SCENARIO_RANDOM, SCENARIO_ARMOR,
-    SCENARIO_LEVELUP, SCENARIO_EASYMODE,
+    SCENARIO_LEVELUP, SCENARIO_EASYMODE, SCENARIO_UNDEAD,
 )
 
 # --- Constantes (doivent rester synchronisées avec locations.py) ---
@@ -123,6 +123,7 @@ class CloneDroneContext(CommonContext):
         self.scene = None
         self.session_info = None   # (slot, room, goal) une fois connecté à Archipelago
         self.skillpoint_price = 3  # multiplicateur de prix de départ (option skillpoint_price)
+        self.confusion = "0,0,0,0,0,0,0,0"   # confusion % : inferno,sprinter,raptor,random,armor,levelup,easymode,undead
         self.overpriced_shop = 0   # nombre d'upgrades à +3 skillpoints, retirées au hasard à chaque mort (0 = désactivé)
         self.goal_n = GOAL_LEVELS[2]
         self.keys_mode = 0         # option multi_step_keys (0 = non, 1 = sans le dernier, 2 = avec le dernier)
@@ -171,6 +172,7 @@ class CloneDroneContext(CommonContext):
                 if slot_data.get("armor", 0):    scenarios.append(SCENARIO_ARMOR)
                 if slot_data.get("levelup", 0):  scenarios.append(SCENARIO_LEVELUP)
                 if slot_data.get("easymode", 0): scenarios.append(SCENARIO_EASYMODE)
+                if slot_data.get("undead", 0):   scenarios.append(SCENARIO_UNDEAD)
                 if not scenarios:
                     scenarios = [SCENARIO_NORMAL]
                 rng = random.Random(f"{getattr(self, 'seed_name', '') or ''}:{self.slot}")
@@ -187,6 +189,8 @@ class CloneDroneContext(CommonContext):
             goal_str = f"{GOAL_NAMES.get(goal_value, 'uranium')}:{self.keys_mode}"   # ex. "uranium:1", relu par le C#
             self.skillpoint_price = int(slot_data.get("skillpoint_price", 3))   # anciennes seeds : 3
             self.overpriced_shop = int(slot_data.get("overpriced_shop", 0))     # anciennes seeds : désactivé
+            self.confusion = ",".join(str(int(slot_data.get(f"confusion_{n}", 0)))   # anciennes seeds : 0
+                                      for n in ("inferno", "sprinter", "raptor", "random", "armor", "levelup", "easymode", "undead"))
             self.session_info = (slot_name, room_name, goal_str)
             asyncio.create_task(
                 send_session_info_to_game(slot_name, room_name, goal_str, str(self.scene), self)
@@ -257,7 +261,8 @@ async def send_used_to_game(ctx):
 async def send_session_info_to_game(slot: str, room: str, goal: str, scene: str, ctx=None):
     price = getattr(ctx, "skillpoint_price", 3) if ctx is not None else 3
     overpriced = getattr(ctx, "overpriced_shop", 0) if ctx is not None else 0
-    payload = f"SESSION:{slot}|{room}|{goal}|{scene}|{price}|{overpriced}\n"
+    confusion = getattr(ctx, "confusion", "0,0,0,0,0,0,0,0") if ctx is not None else "0,0,0,0,0,0,0,0"
+    payload = f"SESSION:{slot}|{room}|{goal}|{scene}|{price}|{overpriced}|{confusion}\n"
     while True:
         try:
             reader, writer = await asyncio.open_connection('127.0.0.1', 38282)
