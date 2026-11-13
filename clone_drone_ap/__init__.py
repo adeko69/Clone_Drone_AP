@@ -14,7 +14,7 @@ from .locations import (
 from .upgrade_data import split_step_suffix, item_blocked_at, win_step_name, upgrade_location_id
 from .regions import create_regions
 from .rules import set_rules
-from .options import CloneDroneOptions, Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode, Undead, ConfusionInferno, ConfusionSprinter, ConfusionRaptor, ConfusionTotallyRandom, ConfusionArmor, ConfusionLevelUp, ConfusionEasyMode, ConfusionUndead
+from .options import CloneDroneOptions, Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode, Undead, Doggos, Summoners, ConfusionInferno, ConfusionSprinter, ConfusionRaptor, ConfusionTotallyRandom, ConfusionArmor, ConfusionLevelUp, ConfusionEasyMode, ConfusionUndead, ConfusionDoggos, ConfusionSummoners
 from .steps import plan_step_items, GLOBAL_PRIORITY
 from .logic import stuck_prefills
 from worlds.LauncherComponents import Component, components, Type, launch_subprocess
@@ -61,8 +61,8 @@ class CloneDroneWeb(WebWorld):
     # Chaque groupe devient un onglet (Options Creator du lanceur, page d'options du site).
     # Les options hors groupe restent dans "Game Options". Le YAML ne change pas.
     option_groups = [
-        OptionGroup("Scenario", [Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode, Undead]),
-        OptionGroup("Confusion", [ConfusionInferno, ConfusionSprinter, ConfusionRaptor, ConfusionTotallyRandom, ConfusionArmor, ConfusionLevelUp, ConfusionEasyMode, ConfusionUndead]),
+        OptionGroup("Scenario", [Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode, Undead, Doggos, Summoners]),
+        OptionGroup("Confusion", [ConfusionInferno, ConfusionSprinter, ConfusionRaptor, ConfusionTotallyRandom, ConfusionArmor, ConfusionLevelUp, ConfusionEasyMode, ConfusionUndead, ConfusionDoggos, ConfusionSummoners]),
     ]
 
 
@@ -99,6 +99,8 @@ class CloneDroneWorld(World):
         if o.levelup.value:  scenarios.append(SCENARIO_LEVELUP)
         if o.easymode.value: scenarios.append(SCENARIO_EASYMODE)
         if o.undead.value:   scenarios.append(SCENARIO_UNDEAD)
+        if o.doggos.value: scenarios.append(SCENARIO_DOGGOS)
+        if o.summoners.value: scenarios.append(SCENARIO_SUMMONERS)
 
         scenario_values = generate_scene(scenarios, o.steps.value, self.random)
         self.weapons = self._draw_weapons()
@@ -490,6 +492,7 @@ class CloneDroneWorld(World):
             "shop_discount_count": self._shop_discount_count(),
             "overpriced_shop": int(self.options.overpriced_shop.value),
             "randomize_starting_weapon": int(self.options.randomize_starting_weapon.value),
+            "randomize_voices": int(self.options.randomize_voices.value),
             "normal": int(self.options.normal.value),
             "inferno": int(self.options.inferno.value),
             "sprinter": int(self.options.jetpack.value),
@@ -499,6 +502,8 @@ class CloneDroneWorld(World):
             "levelup": int(self.options.levelup.value),
             "easymode": int(self.options.easymode.value),
             "undead": int(self.options.undead.value),
+            "doggos": int(self.options.doggos.value),
+            "summoners": int(self.options.summoners.value),
             "confusion_inferno": int(self.options.confusion_inferno.value),
             "confusion_sprinter": int(self.options.confusion_jetpack.value),
             "confusion_raptor": int(self.options.confusion_raptor.value),
@@ -507,4 +512,6 @@ class CloneDroneWorld(World):
             "confusion_levelup": int(self.options.confusion_levelup.value),
             "confusion_easymode": int(self.options.confusion_easymode.value),
             "confusion_undead": int(self.options.confusion_undead.value),
+            "confusion_doggos": int(self.options.confusion_doggos.value),
+            "confusion_summoners": int(self.options.confusion_summoners.value),
         }

@@ -7,13 +7,11 @@ class CloneDroneGoal(Choice):
     - Get Titanium
     - Get Uranium
     - Get Insanium
-    - Get Silver (debug, 4 levels)
     """
     display_name = "Goal"
     option_titanium = 1
     option_uranium = 2
     option_insanium = 3
-    option_silver = 4
     default = 2
 
 class Steps(Range):
@@ -137,6 +135,13 @@ class StepIsStepLocked(Toggle):
     display_name = "Step Items are Step Locked"
     default = 0
 
+class RandomizeLines(Toggle):
+    """
+    If you want the Commentatron and other NPCs lines randomized.
+    """
+    display_name = "Randomize Voice Lines"
+    default = 0
+
 class Normal(Toggle):
     """
     Add Normal Case Scenario (No scenario). If there are no scenarios, then normal is turned on automatically
@@ -188,6 +193,15 @@ class Undead(Toggle):
     display_name = "Undead"
     default = 0
 
+class Doggos(Toggle):
+    """Transform enemy into spidertron, sawdog or fire raptor. Boss are included at 1% each."""
+    display_name = "Doggos"
+    default = 0
+
+class Summoners(Toggle):
+    """Only summoners. gl"""
+    display_name = "Summoners"
+    default = 0
 
 class ConfusionInferno(Range):
     """Chance (in %, 0 = disabled) of mixing "Inferno" into other scenarios."""
@@ -245,6 +259,20 @@ class ConfusionUndead(Range):
     range_end = 50
     default = 0
 
+class ConfusionDoggos(Range):
+    """Chance (in %, 0 = disabled) of mixing "Doggos" into other scenarios."""
+    display_name = "Confusion Doggos"
+    range_start = 0
+    range_end = 50
+    default = 0
+
+class ConfusionSummoners(Range):
+    """Chance (in %, 0 = disabled) of mixing "Summoners" into other scenarios."""
+    display_name = "Confusion Summoners"
+    range_start = 0
+    range_end = 50
+    default = 0
+
 
 class MultiStepKeys(Choice):
     """
@@ -297,6 +325,7 @@ class CloneDroneOptions(PerGameCommonOptions):
     step_is_step_locked: StepIsStepLocked
     multi_step_keys: MultiStepKeys
     step_key_location: StepKeyLocation
+    randomize_voices: RandomizeLines
     normal: Normal
     inferno: Inferno
     jetpack: Sprinter
@@ -306,6 +335,8 @@ class CloneDroneOptions(PerGameCommonOptions):
     levelup: LevelUp
     easymode: EasyMode
     undead: Undead
+    doggos: Doggos
+    summoners: Summoners
     confusion_inferno: ConfusionInferno
     confusion_jetpack: ConfusionSprinter
     confusion_raptor: ConfusionRaptor
@@ -314,3 +345,5 @@ class CloneDroneOptions(PerGameCommonOptions):
     confusion_levelup: ConfusionLevelUp
     confusion_easymode: ConfusionEasyMode
     confusion_undead: ConfusionUndead
+    confusion_doggos: ConfusionDoggos
+    confusion_summoners: ConfusionSummoners
