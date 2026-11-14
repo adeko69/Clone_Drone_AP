@@ -3,7 +3,9 @@ A Clone Drone in The Danger Zone Repository for Archipelago.
 
 ## Required Software
 
-- A computer version of Clone Drone in the Danger Zone installed with/near Steam ID build `25044987` (Night Mode Update). apworld and patch v0.1.X should also works on The Enemy Zombie Adventure Update and later update, but some later feature won't work (ride or die upgrades). This version is potentially compatible with later version (purchasable from most online game stores)
+- v0.1.X: Any Clone Drone in the Danger Zone version released after 2023
+- v0.2.X and later: Any Clone Drone in the Danger Zone version released after 2023 (just ensure have RIP Riders in your game)
+- v1.3 and later: Any Clone Drone in the Danger Zone version released after 10th year anniversary (just ensure having latest version)
 - [BepInEx x64](https://github.com/bepinex/bepinex/releases). The game being x64, x86 won't work.
 - The `.apworld` and the `.dll` in the releases
 
