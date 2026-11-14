@@ -1,5 +1,6 @@
 import asyncio
 import random
+import re
 import Utils
 from CommonClient import CommonContext, server_loop, gui_enabled, ClientCommandProcessor, logger, get_base_parser
 from NetUtils import ClientStatus
@@ -26,6 +27,7 @@ RELEASE_STEP_CHECKS_ON_WIN = True
 
 KEY_NEXTFREE = "NextUpgradeFreeUsed"
 KEY_INFINITE_ARMOR = "InfiniteArmorUsed"
+KEY_START_CLONE = "StartCloneUsed"
 
 
 def purchase_checks_of_step(step: int) -> list:
@@ -129,7 +131,7 @@ class CloneDroneContext(CommonContext):
         self.overpriced_shop = 0   # nombre d'upgrades à +3 skillpoints, retirées au hasard à chaque mort (0 = désactivé)
         self.goal_n = GOAL_LEVELS[2]
         self.keys_mode = 0         # option multi_step_keys (0 = non, 1 = sans le dernier, 2 = avec le dernier)
-        self.used = {KEY_NEXTFREE: 0, "StartWithArmorUsed": 0, KEY_INFINITE_ARMOR: 0}
+        self.used = {KEY_NEXTFREE: 0, "StartWithArmorUsed": 0, KEY_INFINITE_ARMOR: 0, KEY_START_CLONE: 0}
 
         # Démarre le serveur TCP local immédiatement pour écouter le jeu, même hors connexion
         self.game_sync_task = asyncio.create_task(game_watcher(self), name="CloneDroneSync")
@@ -205,8 +207,8 @@ class CloneDroneContext(CommonContext):
 
             self.items_sent_to_game = 0
 
-            self.used = {KEY_NEXTFREE: 0, "StartWithArmorUsed": 0, KEY_INFINITE_ARMOR: 0}
-            keys = [self.storage_key(KEY_NEXTFREE), self.storage_key("StartWithArmorUsed"), self.storage_key(KEY_INFINITE_ARMOR)]
+            self.used = {KEY_NEXTFREE: 0, "StartWithArmorUsed": 0, KEY_INFINITE_ARMOR: 0, KEY_START_CLONE: 0}
+            keys = [self.storage_key(KEY_NEXTFREE), self.storage_key("StartWithArmorUsed"), self.storage_key(KEY_INFINITE_ARMOR), self.storage_key(KEY_START_CLONE)]
             asyncio.create_task(self.send_msgs([
                 {"cmd": "SetNotify", "keys": keys},
                 {"cmd": "Get", "keys": keys},
@@ -226,6 +228,51 @@ class CloneDroneContext(CommonContext):
         elif cmd == "ReceivedItems":
             asyncio.create_task(send_pending_items_to_game(self))
 
+    def item_name_for(self, item_id: int, slot: int) -> str:
+        """Nom d'un item dans le jeu du slot receveur (les IDs dépendent du jeu du receveur)."""
+        try:
+            return self.item_names.lookup_in_slot(item_id, slot)
+        except Exception:
+            pass
+        try:
+            game = self.slot_info[slot].game
+            return self.item_names.lookup_in_game(item_id, game)
+        except Exception:
+            return f"Item {item_id}"
+
+    def is_stale_step_item(self, item_name: str) -> bool:
+        """True pour un item "(Step N)" dont le step N est déjà fini : il ne servira plus à rien."""
+        m = re.search(r" \(Step (\d+)\)$", item_name)
+        return bool(m and self.scene is not None and int(m.group(1)) <= self.scene.finished)
+
+    def on_print_json(self, args: dict):
+        # ItemSend = event en direct (contrairement à ReceivedItems, qui rejoue tout l'historique à chaque connexion)
+        if args.get("type") == "ItemSend" and self.slot is not None:
+            try:
+                item = args["item"]                 # NetworkItem : item.player = slot où le check a été trouvé
+                receiver = int(args["receiving"])
+                sender = int(item.player)
+                me = int(self.slot)
+                item_name = self.item_name_for(item.item, receiver)
+
+                if receiver == me and self.is_stale_step_item(item_name):
+                    super().on_print_json(args)   # reste visible dans la console, mais pas dans le HUD
+                    return
+
+                text = None
+                if receiver == me and sender == me:
+                    text = f"You got {item_name}"
+                elif receiver == me:
+                    text = f"{self.player_names[sender]} gave you {item_name}"
+                elif sender == me:
+                    text = f"{item_name} sent to {self.player_names[receiver]}"
+
+                if text:
+                    asyncio.create_task(send_notif_to_game(text))
+            except Exception as e:
+                logger.warning(f"[Notif] ItemSend ignoré : {e}")
+        super().on_print_json(args)
+
     def keys_received(self) -> int:
         """Nombre de "Progressive Key" reçues."""
         return sum(1 for n in self.items_received if self.item_names.lookup_in_game(n.item) == KEY_ITEM)
@@ -234,7 +281,7 @@ class CloneDroneContext(CommonContext):
         return f"CloneDrone_{self.team}_{self.slot}_{name}"
 
     def apply_storage_value(self, key, value) -> bool:
-        for name in (KEY_NEXTFREE, "StartWithArmorUsed", KEY_INFINITE_ARMOR):
+        for name in (KEY_NEXTFREE, "StartWithArmorUsed", KEY_INFINITE_ARMOR, KEY_START_CLONE):
             if key == self.storage_key(name):
                 self.used[name] = int(value or 0)
                 return True
@@ -262,6 +309,7 @@ async def send_used_to_game(ctx):
         f"USED:NextFree:{ctx.used[KEY_NEXTFREE]}\n"
         f"USED:StartArmor:{ctx.used['StartWithArmorUsed']}\n"
         f"USED:60sInfiniteArmor:{ctx.used[KEY_INFINITE_ARMOR]}\n"
+        f"USED:StartClone:{ctx.used[KEY_START_CLONE]}\n"
     )
 
 
@@ -295,6 +343,19 @@ async def send_raw_to_game(message: str):
         await writer.wait_closed()
     except Exception as e:
         logger.error(f"[TCP Client] Can't send raw: {e}")
+
+
+async def send_notif_to_game(text: str):
+    """Message affiché dans le HUD. Silencieux si le jeu n'est pas lancé."""
+    text = " ".join(text.split())   # une seule ligne : le protocole est découpé par \n
+    try:
+        reader, writer = await asyncio.open_connection('127.0.0.1', 38282)
+        writer.write(f"NOTIF:{text}\n".encode('utf-8'))
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+    except Exception:
+        pass
 
 
 async def send_pending_items_to_game(ctx: CloneDroneContext):
@@ -342,12 +403,13 @@ async def handle_game_check(reader, writer, ctx: CloneDroneContext):
         else:
             await send_raw_to_game("PONG\n")
 
-    elif message in ("NEXTFREE_USED", "STARTARMOR_USED", "INFINITEARMOR_USED"):
+    elif message in ("NEXTFREE_USED", "STARTARMOR_USED", "INFINITEARMOR_USED", "STARTCLONE_USED"):
         if ctx.server and ctx.slot:
              key = {
                  "NEXTFREE_USED": KEY_NEXTFREE,
                  "STARTARMOR_USED": "StartWithArmorUsed",
                  "INFINITEARMOR_USED": KEY_INFINITE_ARMOR,
+                 "STARTCLONE_USED": KEY_START_CLONE,
              }[message]
              await bump_storage(ctx, key)
 

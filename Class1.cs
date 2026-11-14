@@ -1019,6 +1019,43 @@ namespace CloneDroneAP
         public static byte TotalInfiniteArmorReceived = 0;
         public static byte InfiniteArmorUsed = 0;
         public static byte InfiniteArmor_left = 0;
+
+        public static byte TotalCloneFillerReceived = 0;
+        public static byte StartCloneUsed = 0;
+        public static byte StartClone_left = 0;
+        private static float _nextCloneGrantTime = 0f;
+
+        public static void RecalculateStartClone()
+        {
+            StartClone_left = (byte)Mathf.Max(0, (int)TotalCloneFillerReceived - StartCloneUsed);
+        }
+
+        private static bool CanGrantCloneNow()
+        {
+            if (Time.unscaledTime < _nextCloneGrantTime) return false;
+            GameFlowManager flow = Singleton<GameFlowManager>.Instance;
+            if (flow == null || flow.IsOnTitleScreen()) return false;
+            if (CloneManager.Instance == null || LevelManager.Instance == null) return false;
+            if (LevelManager.Instance.IsSpawningCurrentLevel()) return false;
+
+            CharacterTracker tracker = Singleton<CharacterTracker>.Instance;
+            FirstPersonMover p = tracker != null ? tracker.GetPlayerRobot() : null;
+            if (p == null || !p.IsAlive() || p.GetTimeSinceCreation() < 1.5f) return false;
+
+            UpgradeManager um = UpgradeManager.Instance;
+            if (um != null && um.UpgradeStation != null && um.UpgradeStation.IsRepairInProgress()) return false;
+
+            return CloneManager.Instance.HasSpawnPointForClone();
+        }
+
+        public static void ConsumeStartClone()
+        {
+            CloneManager.Instance.CreateClone(cloneInitiateByPlayer: false);
+            if (StartCloneUsed < byte.MaxValue) StartCloneUsed++;
+            RecalculateStartClone();
+            _nextCloneGrantTime = Time.unscaledTime + 2f;   // un clone à la fois
+            SendToClient("STARTCLONE_USED");
+        }
         public static void RecalculateInfiniteArmor()
         {
             InfiniteArmor_left = (byte)Mathf.Max(0, (int)TotalInfiniteArmorReceived - InfiniteArmorUsed);
@@ -1033,7 +1070,7 @@ namespace CloneDroneAP
                     armor_before_infinite.Add(mbpt);
                 }
             }
-            infinite_armor_seconds += 60f;
+            infinite_armor_seconds += 61f;
             if (InfiniteArmorUsed < byte.MaxValue) InfiniteArmorUsed++;
             RecalculateInfiniteArmor();
             SendToClient("INFINITEARMOR_USED");
@@ -1062,10 +1099,15 @@ namespace CloneDroneAP
             GameFlowManager flow = Singleton<GameFlowManager>.Instance;
             bool inCombat = flow != null && flow.IsInCombat();
 
-            if (InfiniteArmor_left != 0 && player != null && player.IsAlive() && inCombat)
+            if (StartClone_left > 0 && CanGrantCloneNow())
             {
-                ConsumeInfiniteArmor(player);
+                ConsumeStartClone();
             }
+
+            if (InfiniteArmor_left != 0 && player != null && player.IsAlive() && inCombat)
+                {
+                    ConsumeInfiniteArmor(player);
+                }
 
             if (infinite_armor_seconds > 0f && player != null && player.IsAlive() && inCombat)
             {
@@ -1131,6 +1173,11 @@ namespace CloneDroneAP
                         {
                             NextFreeUsed = (byte)Mathf.Max((int)NextFreeUsed, (int)v);
                             RecalculateFreeUpgrades();
+                        }
+                        else if (up[1] == "StartClone")
+                        {
+                            StartCloneUsed = (byte)Mathf.Max((int)StartCloneUsed, (int)v);
+                            RecalculateStartClone();
                         }
                         else if (up[1] == "StartArmor")
                         {
@@ -1208,6 +1255,10 @@ namespace CloneDroneAP
             TotalFreeUpgradesReceived = 0;
             TotalStartArmorReceived = 0;
             NextFreeUsed = 0;
+            TotalCloneFillerReceived = 0;
+            StartCloneUsed = 0;
+            RecalculateStartClone();
+            _nextCloneGrantTime = Time.unscaledTime + 5f;
             StartArmorUsed = 0;
             NeedsNewRun = false;
             SessionActive = true;
@@ -1259,7 +1310,14 @@ namespace CloneDroneAP
                 return;
             }
 
-            if (itemName.StartsWith("NextUpgradeFree") || itemName.Contains("FreeUpgrade"))
+            if (itemName == "Free Clone")
+            {
+                TotalCloneFillerReceived = (byte)Mathf.Min(255, TotalCloneFillerReceived + 1);
+                RecalculateStartClone();
+                return;
+            }
+
+            if (itemName ==  "Next Upgrade Free")
             {
                 TotalFreeUpgradesReceived++;
                 RecalculateFreeUpgrades();
@@ -1267,16 +1325,31 @@ namespace CloneDroneAP
                 return;
             }
 
-            if (itemName == "60sInfiniteArmor")
+            if (itemName == "60s of Infinite Armor")
             {
                 TotalInfiniteArmorReceived++;
                 RecalculateInfiniteArmor();
                 return;
             }
 
-            if (itemName == "StartWithArmor")
+            if (itemName == "3 Start With Armor")
             {
                 TotalStartArmorReceived = (byte)Mathf.Min(255, TotalStartArmorReceived + 3);
+                RecalculateStartArmor();
+                return;
+            }
+
+            if (itemName == "120s of Infinite Armor")
+            {
+                TotalInfiniteArmorReceived++;
+                TotalInfiniteArmorReceived++;
+                RecalculateInfiniteArmor();
+                return;
+            }
+
+            if (itemName == "6 Start With Armor")
+            {
+                TotalStartArmorReceived = (byte)Mathf.Min(255, TotalStartArmorReceived + 6);
                 RecalculateStartArmor();
                 return;
             }
@@ -1494,7 +1567,7 @@ namespace CloneDroneAP
 
             if (Plugin.infinite_armor_seconds > 0f)
             {
-                Plugin.infinite_armor_seconds += 8f;
+                Plugin.infinite_armor_seconds += 12f;
             }
 
             int goalLevel = Plugin.GetGoalLevel();
@@ -2320,6 +2393,20 @@ namespace CloneDroneAP
             if (__exception != null)
                 Plugin.Log.LogError("[AP] SummonAlly: " + __exception); 
             return __exception; 
+        }
+    }
+
+    [HarmonyPatch(typeof(FirstPersonMover), "StartRiding")]
+    public class BlockInvalidRidingPatch
+    {
+        static bool Prefix(FirstPersonMover __instance, FirstPersonMover __0)
+        {
+            if (__instance == null || __0 == null) return true;
+
+            // Un Doggo (raptor, SawDog, Spidertron...) ne peut pas monter sur un autre ennemi
+            if (!__instance.CanRideOthers()) return false;
+
+            return true;
         }
     }
 

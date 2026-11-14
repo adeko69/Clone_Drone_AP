@@ -31,7 +31,7 @@ item_table: Dict[str, ItemData] = {
     "SpearUnlock": ItemData(BASE_ITEM_ID + 16, ItemClassification.progression),
     "SpearShield+ShieldBash": ItemData(BASE_ITEM_ID + 17, ItemClassification.progression),
     "FireBreath+FireResistance": ItemData(BASE_ITEM_ID + 18, ItemClassification.progression),
-    "NextUpgradeFree": ItemData(BASE_ITEM_ID + 19, ItemClassification.filler),
+    "Next Upgrade Free": ItemData(BASE_ITEM_ID + 19, ItemClassification.filler),
     "Riding": ItemData(BASE_ITEM_ID + 20, ItemClassification.progression),
 }
 
@@ -68,9 +68,9 @@ UPGRADE_PER_STEP_GROUPED, UPGRADE_PER_STEP_UNGROUPED = 2, 3
 
 MAX_STEPS = 5   # doit rester égal à MAX_STEPS dans locations.py
 
-# Tous les items qui débloquent une upgrade côté jeu (tout sauf l'économie : ShopDiscount / NextUpgradeFree)
+# Tous les items qui débloquent une upgrade côté jeu (tout sauf l'économie : ShopDiscount / Next Upgrade Free)
 UPGRADE_ITEMS = [n for n in item_table
-                 if not n.startswith("ShopDiscount") and not n.startswith("NextUpgradeFree")]
+                 if not n.startswith("ShopDiscount") and not n.startswith("Next Upgrade Free")]
 
 
 # Nombre d'exemplaires dans le pool (par copie de step en mode Per Step). Défaut : 1.
@@ -95,9 +95,31 @@ for _step in range(1, MAX_STEPS + 1):
 
 
 
-item_table["StartWithArmor"] = ItemData(BASE_ITEM_ID + 64, ItemClassification.filler)
-item_table["60sInfiniteArmor"] = ItemData(BASE_ITEM_ID + 67, ItemClassification.filler)
+item_table["3 Start With Armor"] = ItemData(BASE_ITEM_ID + 64, ItemClassification.filler)
+item_table["60s of Infinite Armor"] = ItemData(BASE_ITEM_ID + 67, ItemClassification.filler)
 item_table["Clone (All Steps)"] = ItemData(BASE_ITEM_ID + 65, ItemClassification.progression)
+
+# --- Fillers "améliorés" (variantes x2) ---
+# Remplacent le filler de base avec une probabilité de FILLER_UPGRADE_CHANCE (33 %).
+item_table["6 Start With Armor"] = ItemData(BASE_ITEM_ID + 69, ItemClassification.filler)
+item_table["120s of Infinite Armor"] = ItemData(BASE_ITEM_ID + 70, ItemClassification.filler)
+
+item_table["Free Clone"] = ItemData(BASE_ITEM_ID + 71, ItemClassification.filler)   # +1 clone au début du prochain run
+
+FILLER_UPGRADE_CHANCE = 0.33
+FILLER_UPGRADES: Dict[str, str] = {
+    "60s of Infinite Armor": "120s of Infinite Armor",
+    "3 Start With Armor":    "6 Start With Armor",
+}
+
+
+def roll_filler_name(base_name: str, rng) -> str:
+    """Retourne la variante x2 du filler avec 33 % de chance, sinon le filler de base.
+    `rng` = world.random (ou tout objet random.Random)."""
+    upgraded = FILLER_UPGRADES.get(base_name)
+    if upgraded is not None and rng.random() < FILLER_UPGRADE_CHANCE:
+        return upgraded
+    return base_name
 
 
 def shop_discount_step_name(step: int) -> str:

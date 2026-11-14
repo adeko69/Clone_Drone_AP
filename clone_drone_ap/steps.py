@@ -1,7 +1,7 @@
 import sys
 
 # Items globaux gardés en priorité quand les locations sont rares
-GLOBAL_PRIORITY = [f"ShopDiscount_{i}" for i in range(1, 6)] + ["NextUpgradeFree"]
+GLOBAL_PRIORITY = [f"ShopDiscount_{i}" for i in range(1, 6)] + ["Next Upgrade Free"]
 
 def _is_priority(c):  # épée ou clé
     return c.startswith("SwordUnlock (") or c == "Progressive Key"

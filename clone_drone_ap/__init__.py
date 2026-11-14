@@ -6,7 +6,7 @@ from Options import OptionGroup
 from .items import (
     item_table, CloneDroneItem, SPLIT_PARENTS, SPLIT_PARTS, UPGRADE_ITEMS, ITEM_COPIES, step_item_name,
     UPGRADE_GLOBAL_UNGROUPED, UPGRADE_PER_STEP_GROUPED, UPGRADE_PER_STEP_UNGROUPED,
-    shop_discount_step_name, MAX_SKILLPOINT_PRICE, KEY_ITEM, key_count,
+    shop_discount_step_name, MAX_SKILLPOINT_PRICE, KEY_ITEM, key_count, roll_filler_name,
 )
 from .locations import (
     location_table, GOAL_LEVELS, get_active_location_names, get_level_names_by_step, LOCATION_STEP, LOCATION_UPGRADE,
@@ -243,12 +243,14 @@ class CloneDroneWorld(World):
             self._create_global_items(total_locations, ungroup, consumed)
 
 
-    FILLER_NAMES = ("NextUpgradeFree", "StartWithArmor", "60sInfiniteArmor")
+    FILLER_NAMES = ("Next Upgrade Free", "3 Start With Armor", "60s of Infinite Armor", "Free Clone")
 
     def _filler_names(self, count: int) -> list:
         count = max(0, count)
         weights = [self.random.random() for _ in self.FILLER_NAMES]
-        return self.random.choices(self.FILLER_NAMES, weights=weights, k=count)
+        names = self.random.choices(self.FILLER_NAMES, weights=weights, k=count)
+        # 33 % des "3 Start With Armor" / "60s of Infinite Armor" deviennent "6 Start With Armor" / "120s of Infinite Armor"
+        return [roll_filler_name(n, self.random) for n in names]
 
     def _create_global_items(self, total_locations: int, ungroup: bool, consumed: list) -> None:
         weapon_mode = int(self.options.randomize_starting_weapon.value)
@@ -363,7 +365,7 @@ class CloneDroneWorld(World):
             self.random.shuffle(leftovers)
             leftovers.sort(key=lambda n: item_table[n].classification != ItemClassification.progression)
 
-        # Le reste du pool : items globaux (ShopDiscount, NextUpgradeFree...)
+        # Le reste du pool : items globaux (ShopDiscount, Next Upgrade Free...)
         remaining = total_locations - len(self.prefill)
         names = ([KEY_ITEM] * self.missing_keys + priority + leftovers)[:remaining]
         names += self._filler_names(remaining - len(names))   # les places vides = fillers

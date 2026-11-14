@@ -12,7 +12,7 @@ from typing import Dict, List, Tuple
 
 from .items import item_table, step_item_name, KEY_ITEM
 from .locations import LOCATION_STEP, LOCATION_UPGRADE
-from .upgrade_data import ITEM_GRANTS, ROMAN, blockers
+from .upgrade_data import ITEM_GRANTS, ROMAN, blockers, PREREQ_LEVEL
 
 _ROMAN_TO_INT = {v: k for k, v in ROMAN.items()}
 
@@ -45,7 +45,10 @@ def purchase_requirements(location_name: str, universe: Counter) -> List[Tuple[T
         names = tuple(n for n in grant_names(ancestor, step) if universe[n] > 0)
         if not names:
             continue
-        need = purchase_level(location_name) if ancestor == upgrade == "Hammer" else 1   # Progressive Hammer : niveau N = N exemplaires
+        if ancestor == upgrade == "Hammer":
+            need = purchase_level(location_name)   # Progressive Hammer : niveau N = N exemplaires
+        else:
+            need = PREREQ_LEVEL.get((upgrade, ancestor), 1)
         requirement = (names, min(need, sum(universe[n] for n in names)))
         if requirement not in out:   # un item groupé débloque parfois plusieurs ancêtres : une seule exigence suffit
             out.append(requirement)

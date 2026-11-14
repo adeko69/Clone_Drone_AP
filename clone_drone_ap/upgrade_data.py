@@ -173,6 +173,10 @@ PREREQ: Dict[str, Tuple[str, ...]] = {
     "EnergyRecharge": ("EnergyCapacity",),
 }
 
+PREREQ_LEVEL: Dict[Tuple[str, str], int] = {
+    ("FireHammer", "Hammer"): 2,
+}
+
 
 def blockers(upgrade: str) -> set:
     """L'upgrade elle-même et tous ses ancêtres (tous les parents, récursivement) : les items qui les
