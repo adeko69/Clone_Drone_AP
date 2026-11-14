@@ -459,6 +459,22 @@ namespace CloneDroneAP
         }
         public class ApHud : MonoBehaviour
         {
+            private struct Notif
+            {
+                public string Text;
+                public float Expire;
+            }
+
+            private readonly List<Notif> _notifs = new List<Notif>();
+
+            public void Push(string text)
+            {
+                if (string.IsNullOrEmpty(text)) return;
+                _notifs.Add(new Notif { Text = text, Expire = Time.unscaledTime + 10f });
+                if (_notifs.Count > 15) _notifs.RemoveAt(0);
+                _nextUpdate = 0f; // force un rafraîchissement immédiat
+            }
+
             public static ApHud Instance;
             private Text _text;
             private bool _initialized = false;
@@ -529,7 +545,7 @@ namespace CloneDroneAP
                     rt.anchorMax = new Vector2(0f, 1f);
                     rt.pivot = new Vector2(0f, 1f);
                     rt.anchoredPosition = new Vector2(30f, -30f);
-                    rt.sizeDelta = new Vector2(800f, 200f);
+                    rt.sizeDelta = new Vector2(800f, 400f);
                 }
                 catch (System.Exception ex)
                 {
@@ -576,6 +592,14 @@ namespace CloneDroneAP
                     _sb.Append("Next upgrades free: ").Append(Plugin.NextUpgradesFree).Append('\n');
                 if (Plugin.infinite_armor_seconds > 0 && inCombat)
                     _sb.Append("Infinite Armor (seconds): ").Append(Plugin.infinite_armor_seconds.ToString("0.##")).Append('\n');
+
+                _notifs.RemoveAll(n => n.Expire <= Time.unscaledTime);
+                if (_notifs.Count > 0)
+                {
+                    _sb.Append('\n');
+                    foreach (Notif n in _notifs)
+                        _sb.Append(n.Text).Append('\n');
+                }
 
                 return _sb.ToString();
             }
@@ -1123,6 +1147,11 @@ namespace CloneDroneAP
                     continue;
                 }
 
+                if (message.StartsWith("NOTIF:"))
+                {
+                    if (ApHud.Instance != null) ApHud.Instance.Push(message.Substring(6));
+                    continue;
+                }
                 ap_grant_item(message);
             }
 
