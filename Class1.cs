@@ -228,6 +228,28 @@ namespace CloneDroneAP
         private static int _finishedSteps = 0;
         private static int _currentStepIndex = -1;
         private static Scenario _currentScenario = Scenario.End;
+
+        public const int WeaponModeEveryDeath = 3;
+        public static int WeaponMode = 0;
+        public static bool IncludeBow = true;
+        public static bool EveryDeathWeapons { get { return WeaponMode == WeaponModeEveryDeath; } }
+        private static int _everyDeathOwner = int.MinValue;
+        private static Weapons _everyDeathWeapon = Weapons.WeaponSword;
+
+        public static void RollEveryDeathWeapon(FirstPersonMover player)
+        {
+            if (!EveryDeathWeapons || player == null || Scene.Count == 0 || SceneComplete) return;
+            int id = player.GetInstanceID();
+            if (id == _everyDeathOwner) return;          // déjà tiré pour cette vie
+            _everyDeathOwner = id;
+
+            List<Weapons> pool = new List<Weapons> { Weapons.WeaponSword, Weapons.WeaponHammer, Weapons.WeaponSpear };
+            if (IncludeBow) pool.Add(Weapons.WeaponBow);
+            _everyDeathWeapon = pool[UnityEngine.Random.Range(0, pool.Count)];
+
+            if (ApHud.Instance != null) ApHud.Instance.Push("Weapon: " + WeaponName((int)_everyDeathWeapon));
+        }
+
         private static void RecomputeSceneCache()
         {
             sbyte finished = 0;
@@ -363,6 +385,7 @@ namespace CloneDroneAP
         {
             get
             {
+                if (EveryDeathWeapons) return _everyDeathWeapon;
                 int i = _currentStepIndex;
                 return (i >= 0 && i < SceneWeapons.Count) ? SceneWeapons[i] : Weapons.WeaponSword;
             }
@@ -1024,6 +1047,18 @@ namespace CloneDroneAP
         public static byte StartCloneUsed = 0;
         public static byte StartClone_left = 0;
         private static float _nextCloneGrantTime = 0f;
+        public static byte betterWeapon = 0;
+
+        public static float WeaponMultiplier
+        {
+            get { return Mathf.Pow(1.076f, betterWeapon); }//3x si 15
+        }
+        public static byte betterEnergy = 0;
+
+        public static float EnergyMultiplier
+        {
+            get { return Mathf.Pow(0.95f, betterEnergy); }
+        }
 
         public static void RecalculateStartClone()
         {
@@ -1244,6 +1279,10 @@ namespace CloneDroneAP
                 }
             }
             RandomizeVoices = (parts.Length >= 8 && int.TryParse(parts[7].Trim(), out int sessionVoices)) && sessionVoices != 0;
+            int sessionWeaponMode;
+            WeaponMode = (parts.Length >= 9 && int.TryParse(parts[8].Trim(), out sessionWeaponMode)) ? sessionWeaponMode : 0;
+            IncludeBow = !(parts.Length >= 10 && parts[9].Trim() == "0");
+            _everyDeathOwner = int.MinValue;
             RandomizeAllSpeechSequencesPatch.ApplyVoiceRandomization();
             LoadScene(parts.Length >= 4 ? parts[3] : "");
             StepUnlockedUpgrades.Clear();
@@ -1256,6 +1295,8 @@ namespace CloneDroneAP
             TotalStartArmorReceived = 0;
             NextFreeUsed = 0;
             TotalCloneFillerReceived = 0;
+            betterEnergy = 0;
+            betterWeapon = 0;
             StartCloneUsed = 0;
             RecalculateStartClone();
             _nextCloneGrantTime = Time.unscaledTime + 5f;
@@ -1314,6 +1355,19 @@ namespace CloneDroneAP
             {
                 TotalCloneFillerReceived = (byte)Mathf.Min(255, TotalCloneFillerReceived + 1);
                 RecalculateStartClone();
+                return;
+            }
+
+            if (itemName == "Progressive Weapon Boost")
+            {
+                betterWeapon++;
+                SwordSizePatch.ReapplyAll();
+                return;
+            }
+
+            if (itemName == "Progressive Energy Boost")
+            {
+                betterEnergy++;
                 return;
             }
 
@@ -1691,6 +1745,146 @@ namespace CloneDroneAP
         {
             __result = false;
             return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(HammerImpactMeleeArea), "tryDamageBodyPart")]
+    public class HammerBoostPatch
+    {
+        static void Prefix(HammerImpactMeleeArea __instance, out float __state)
+        {
+            __state = __instance.ImpactMultiplier;
+            if (__instance.Owner != null && __instance.Owner.IsMainPlayer())
+                __instance.ImpactMultiplier = __state * Plugin.WeaponMultiplier;
+        }
+
+        static System.Exception Finalizer(HammerImpactMeleeArea __instance, float __state, System.Exception __exception)
+        {
+            __instance.ImpactMultiplier = __state;
+            return __exception;
+        }
+    }
+
+    [HarmonyPatch(typeof(EnergySource), "CanConsume")]
+    public class EnergyCanConsumePatch
+    {
+        static void Prefix(EnergySource __instance, ref float energyLevel)
+        {
+            if (__instance == null || Plugin.betterEnergy == 0) return;
+
+            Character c = __instance.GetComponentInParent<Character>();
+            if (c != null && c.IsMainPlayer())
+                energyLevel *= Plugin.EnergyMultiplier;
+        }
+    }
+
+    [HarmonyPatch(typeof(WeaponModel), "SetOwner")]
+    public class SwordSizePatch
+    {
+        private static readonly ConditionalWeakTable<WeaponModel, object> _baseScale =
+            new ConditionalWeakTable<WeaponModel, object>();
+
+        static void Postfix(WeaponModel __instance, FirstPersonMover owner)
+        {
+            if (owner == null || !owner.IsMainPlayer()) return;
+            Apply(__instance);
+        }
+
+        private static void Apply(WeaponModel wm)
+        {
+            if (wm == null || wm.WeaponType != WeaponType.Sword) return;
+
+            object boxed;
+            if (!_baseScale.TryGetValue(wm, out boxed))
+            {
+                boxed = wm.transform.localScale;
+                _baseScale.Add(wm, boxed);
+            }
+            wm.transform.localScale = (Vector3)boxed * Plugin.WeaponMultiplier;
+        }
+
+        [HarmonyPatch(typeof(ArrowProjectile), "StartFlying",
+    new System.Type[] {
+        typeof(Vector3), typeof(Vector3), typeof(bool),
+        typeof(Character), typeof(bool), typeof(int), typeof(float)
+    })]
+        public class ArrowSpeedPatch
+        {
+            // vitesse de base de chaque flèche (les projectiles sont recyclés par le jeu)
+            private static readonly ConditionalWeakTable<ArrowProjectile, object> _baseSpeed =
+                new ConditionalWeakTable<ArrowProjectile, object>();
+
+            static void Prefix(ArrowProjectile __instance, Character owner)
+            {
+                if (__instance == null) return;
+
+                object boxed;
+                if (!_baseSpeed.TryGetValue(__instance, out boxed))
+                {
+                    boxed = __instance.VelocityMagnitude;
+                    _baseSpeed.Add(__instance, boxed);
+                }
+
+                bool fromPlayer = owner != null && owner.IsMainPlayer();
+                __instance.VelocityMagnitude = (float)boxed * (fromPlayer ? Plugin.WeaponMultiplier : 1f);
+            }
+        }
+
+        [HarmonyPatch(typeof(FirstPersonMover), "Update")]
+        public class SpearSpeedPatch
+        {
+            private static readonly List<Animator> _animators = new List<Animator>();
+            private static readonly HashSet<Animator> _boosted = new HashSet<Animator>();
+            private static FirstPersonMover _owner;
+            private static float _nextScan;
+
+            static void Postfix(FirstPersonMover __instance)
+            {
+                if (__instance == null || !__instance.IsMainPlayer()) return;
+
+                WeaponManager wm = Singleton<WeaponManager>.Instance;
+                if (wm == null) return;
+
+                if (_owner != __instance || Time.unscaledTime >= _nextScan)
+                {
+                    _owner = __instance;
+                    _nextScan = Time.unscaledTime + 1f;
+                    _animators.Clear();
+                    _animators.AddRange(__instance.GetComponentsInChildren<Animator>(true));
+                }
+
+                float mult = Plugin.WeaponMultiplier;
+                for (int i = 0; i < _animators.Count; i++)
+                {
+                    Animator a = _animators[i];
+                    if (a == null) continue;
+
+                    RuntimeAnimatorController c = a.runtimeAnimatorController;
+                    bool isSpear = c != null &&
+                        (c == wm.SpearUpperBodyAnimator || c == wm.Multiplayer_SpearUpperBodyAnimator);
+
+                    if (isSpear)
+                    {
+                        a.speed = mult;
+                        _boosted.Add(a);
+                    }
+                    else if (_boosted.Remove(a))
+                    {
+                        a.speed = 1f; // on a changé d'arme : on remet la vitesse normale
+                    }
+                }
+            }
+        }
+
+        // à appeler quand un boost arrive en pleine partie
+        public static void ReapplyAll()
+        {
+            CharacterTracker tracker = Singleton<CharacterTracker>.Instance;
+            FirstPersonMover p = tracker != null ? tracker.GetPlayerRobot() : null;
+            if (p == null) return;
+
+            foreach (WeaponModel wm in p.GetComponentsInChildren<WeaponModel>(true))
+                Apply(wm);
         }
     }
 
@@ -2245,6 +2439,7 @@ namespace CloneDroneAP
 
         private static void PlayerPrefix(FirstPersonMover player)
         {
+            Plugin.RollEveryDeathWeapon(player);
             if (!Plugin.HasStartingWeaponOverride) return;
 
             UpgradeCollection upgrades = Refl.GetUpgrades(player);
@@ -2403,12 +2598,24 @@ namespace CloneDroneAP
         {
             if (__instance == null || __0 == null) return true;
 
-            // Un Doggo (raptor, SawDog, Spidertron...) ne peut pas monter sur un autre ennemi
             if (!__instance.CanRideOthers()) return false;
-
             return true;
         }
     }
+
+    [HarmonyPatch(typeof(EnergySource), "Consume")]
+    public class EnergyCostPatch
+    {
+        static void Prefix(EnergySource __instance, ref float energyAmount)
+        {
+            if (__instance == null || Plugin.betterEnergy == 0) return;
+
+            Character c = __instance.GetComponentInParent<Character>();
+            if (c != null && c.IsMainPlayer())
+                energyAmount *= Plugin.EnergyMultiplier;
+        }
+    }
+
 
     [HarmonyPatch]
     public class SpeechCoroutineSafetyPatch

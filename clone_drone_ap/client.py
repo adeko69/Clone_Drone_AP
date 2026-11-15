@@ -122,6 +122,8 @@ class CloneDroneContext(CommonContext):
 
     def __init__(self, server_address, password):
         self.randomize_voices = 0
+        self.weapon_mode = 0       # option randomize_starting_weapon (3 = Every Death, tirage fait par le jeu)
+        self.include_bow = 1       # option include_bow_in_weapon_randomization
         super().__init__(server_address, password)
         self.items_sent_to_game = 0
         self.scene = None
@@ -151,6 +153,8 @@ class CloneDroneContext(CommonContext):
             
             slot_data = args.get("slot_data", {})
             self.randomize_voices = int(slot_data.get("randomize_voices", 0))
+            self.weapon_mode = int(slot_data.get("randomize_starting_weapon", 0))
+            self.include_bow = int(slot_data.get("include_bow", 1))
 
             # Active le DeathLink si coché dans le YAML
             if slot_data.get("death_link", False):
@@ -318,7 +322,9 @@ async def send_session_info_to_game(slot: str, room: str, goal: str, scene: str,
     overpriced = getattr(ctx, "overpriced_shop", 0) if ctx is not None else 0
     confusion = getattr(ctx, "confusion", "0,0,0,0,0,0,0,0,0,0") if ctx is not None else "0,0,0,0,0,0,0,0,0,0"
     voices = getattr(ctx, "randomize_voices", 0) if ctx is not None else 0
-    payload = f"SESSION:{slot}|{room}|{goal}|{scene}|{price}|{overpriced}|{confusion}|{voices}\n"
+    weapon_mode = getattr(ctx, "weapon_mode", 0) if ctx is not None else 0
+    include_bow = getattr(ctx, "include_bow", 1) if ctx is not None else 1
+    payload = f"SESSION:{slot}|{room}|{goal}|{scene}|{price}|{overpriced}|{confusion}|{voices}|{weapon_mode}|{include_bow}\n"
     while True:
         try:
             reader, writer = await asyncio.open_connection('127.0.0.1', 38282)

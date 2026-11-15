@@ -52,9 +52,34 @@ class SkillpointPrice(Range):
     range_end = 5
     default = 3
 
+class FillerNextUpgradeFree(Toggle):
+    """Generate "Next Upgrade Free" fillers."""
+    display_name = "Next Upgrade Free"
+    default = 1
+
+class FillerStartWithArmor(Toggle):
+    """Generate "3 Start With Armor" fillers (and their 6x variant, rolled at 33%)."""
+    display_name = "3 Start With Armor"
+    default = 1
+
+class FillerInfiniteArmor(Toggle):
+    """Generate "60s of Infinite Armor" fillers (and their 120s variant, rolled at 33%)."""
+    display_name = "60s of Infinite Armor"
+    default = 1
+
+class FillerEnergyBoost(Toggle):
+    """Generate "Progressive Energy Boost" fillers."""
+    display_name = "Progressive Energy Boost"
+    default = 1
+
+class FillerWeaponBoost(Toggle):
+    """Generate "Progressive Weapon Boost" fillers."""
+    display_name = "Progressive Weapon Boost"
+    default = 1
+
 class IncludeBowInWeaponRandomization(Toggle):
     """
-    Only used with "Randomize Starting Weapon" (Same Per Step / Random By Step).
+    Only used with "Randomize Starting Weapon" (Same Per Step / Random By Step / Every Death).
     On: the Bow can be drawn as a starting weapon.
     Off: the Bow is never drawn (0% chance).
     """
@@ -117,14 +142,19 @@ class RandomizeStartingWeapon(Choice):
     - Same Per Step: one weapon is drawn once and used for every step.
       It is given as a starting item, and removed from the item pool.
     - Random By Step: every step gets its own weapon (the weapons vary from step to step).
+    - Every Death: a new weapon is drawn by the game at EVERY reset (each death and each new step).
+      It is only a loan for that life: nothing is given as a starting item, the Sword becomes an item to find,
+      and every weapon unlock purchase check exists (you can buy and switch weapons during the run).
     Unless you start with the sword, the Sword becomes an item to find, and you start the step without it.
     The unlock of the weapon you start with is always given as a starting item
     (with a Global upgrade mode and Random By Step, only for the first step).
+    Not applicable to Every Death (no starting item, the weapon is only lent for the current life).
     """
     display_name = "Randomize Starting Weapon"
     option_none = 0
     option_same_per_step = 1
     option_random_by_step = 2
+    option_every_death = 3
     default = 0
 
 class StepIsStepLocked(Toggle):
@@ -326,6 +356,11 @@ class CloneDroneOptions(PerGameCommonOptions):
     multi_step_keys: MultiStepKeys
     step_key_location: StepKeyLocation
     randomize_voices: RandomizeLines
+    filler_next_upgrade_free: FillerNextUpgradeFree
+    filler_start_with_armor: FillerStartWithArmor
+    filler_infinite_armor: FillerInfiniteArmor
+    filler_energy_boost: FillerEnergyBoost
+    filler_weapon_boost: FillerWeaponBoost
     normal: Normal
     inferno: Inferno
     jetpack: Sprinter

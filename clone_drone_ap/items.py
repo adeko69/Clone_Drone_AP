@@ -104,7 +104,9 @@ item_table["Clone (All Steps)"] = ItemData(BASE_ITEM_ID + 65, ItemClassification
 item_table["6 Start With Armor"] = ItemData(BASE_ITEM_ID + 69, ItemClassification.filler)
 item_table["120s of Infinite Armor"] = ItemData(BASE_ITEM_ID + 70, ItemClassification.filler)
 
-item_table["Free Clone"] = ItemData(BASE_ITEM_ID + 71, ItemClassification.filler)   # +1 clone au début du prochain run
+item_table["Free Clone"] = ItemData(BASE_ITEM_ID + 71, ItemClassification.filler) 
+item_table["Progressive Energy Boost"] = ItemData(BASE_ITEM_ID + 72, ItemClassification.filler)
+item_table["Progressive Weapon Boost"] = ItemData(BASE_ITEM_ID + 73, ItemClassification.filler)
 
 FILLER_UPGRADE_CHANCE = 0.33
 FILLER_UPGRADES: Dict[str, str] = {

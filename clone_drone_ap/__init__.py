@@ -14,7 +14,7 @@ from .locations import (
 from .upgrade_data import split_step_suffix, item_blocked_at, win_step_name, upgrade_location_id
 from .regions import create_regions
 from .rules import set_rules
-from .options import CloneDroneOptions, Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode, Undead, Doggos, Summoners, ConfusionInferno, ConfusionSprinter, ConfusionRaptor, ConfusionTotallyRandom, ConfusionArmor, ConfusionLevelUp, ConfusionEasyMode, ConfusionUndead, ConfusionDoggos, ConfusionSummoners
+from .options import CloneDroneOptions, CloneDroneOptions, FillerNextUpgradeFree, FillerStartWithArmor, FillerInfiniteArmor, FillerEnergyBoost, FillerWeaponBoost, Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode, Undead, Doggos, Summoners, ConfusionInferno, ConfusionSprinter, ConfusionRaptor, ConfusionTotallyRandom, ConfusionArmor, ConfusionLevelUp, ConfusionEasyMode, ConfusionUndead, ConfusionDoggos, ConfusionSummoners
 from .steps import plan_step_items, GLOBAL_PRIORITY
 from .logic import stuck_prefills
 from worlds.LauncherComponents import Component, components, Type, launch_subprocess
@@ -24,6 +24,9 @@ from .scenarios import *
 # Part des items "(Step N)" qui peuvent atterrir dans le monde des autres joueurs (le reste est verrouillé ici).
 # Seulement en multiworld : en solo il n'y a pas d'autre monde, tout doit rester dans les locations du step.
 INTERWORLD_RATIO = 0.70
+
+# Option "Randomize Starting Weapon" : 3 = Every Death (nouveau). 0/1/2 viennent de scenarios.py.
+WEAPON_MODE_EVERY_DEATH = 3
 
 # Option "Shop Discount Chance Generation" / "Step Shop Discount Per Step" (valeurs de options.py)
 SHOP_GEN_RANDOM = 1
@@ -61,6 +64,7 @@ class CloneDroneWeb(WebWorld):
     # Chaque groupe devient un onglet (Options Creator du lanceur, page d'options du site).
     # Les options hors groupe restent dans "Game Options". Le YAML ne change pas.
     option_groups = [
+        OptionGroup("Filler", [FillerNextUpgradeFree, FillerStartWithArmor, FillerInfiniteArmor, FillerEnergyBoost, FillerWeaponBoost]),
         OptionGroup("Scenario", [Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode, Undead, Doggos, Summoners]),
         OptionGroup("Confusion", [ConfusionInferno, ConfusionSprinter, ConfusionRaptor, ConfusionTotallyRandom, ConfusionArmor, ConfusionLevelUp, ConfusionEasyMode, ConfusionUndead, ConfusionDoggos, ConfusionSummoners]),
     ]
@@ -106,10 +110,14 @@ class CloneDroneWorld(World):
         self.weapons = self._draw_weapons()
         self.scene = format_scene(scenario_values, self.weapons)   # "X:Y;X:Y;..."
         # Pas de check d'achat pour l'arme de départ de chaque step (déjà possédée) : épée, arc, marteau niv. I, lance
-        self.skipped_checks = {
-            upgrade_location_id(k, *START_WEAPON_CHECK[self.weapons[k - 1]])
-            for k in range(1, o.steps.value + 1)
-        }
+        # Every Death : l'arme n'est que prêtée à chaque vie, donc TOUS les checks d'unlock existent
+        if int(o.randomize_starting_weapon.value) == WEAPON_MODE_EVERY_DEATH:
+            self.skipped_checks = set()
+        else:
+            self.skipped_checks = {
+                upgrade_location_id(k, *START_WEAPON_CHECK[self.weapons[k - 1]])
+                for k in range(1, o.steps.value + 1)
+            }
 
         # Multi-Step Keys
         self.keys_mode = int(o.multi_step_keys.value)
@@ -126,6 +134,9 @@ class CloneDroneWorld(World):
         o = self.options
         mode = int(o.randomize_starting_weapon.value)
         steps = o.steps.value
+        if mode == WEAPON_MODE_EVERY_DEATH:
+            # Tirage fait par le jeu à chaque reset : la seed ne fixe aucune arme (valeur neutre = épée)
+            return [WEAPON_SWORD] * steps
         weapons = generate_weapons(mode, steps, self.random)
         if mode == WEAPON_MODE_NONE or o.include_bow_in_weapon_randomization.value:
             return weapons
@@ -243,13 +254,26 @@ class CloneDroneWorld(World):
             self._create_global_items(total_locations, ungroup, consumed)
 
 
-    FILLER_NAMES = ("Next Upgrade Free", "3 Start With Armor", "60s of Infinite Armor", "Free Clone")
+    FILLER_TOGGLES = {
+        "Next Upgrade Free":        "filler_next_upgrade_free",
+        "3 Start With Armor":       "filler_start_with_armor",
+        "60s of Infinite Armor":    "filler_infinite_armor",
+        "Free Clone":               None,
+        "Progressive Energy Boost": "filler_energy_boost",
+        "Progressive Weapon Boost": "filler_weapon_boost",
+    }
+
+    def _active_filler_names(self) -> list:
+        return [name for name, attr in self.FILLER_TOGGLES.items()
+                if attr is None or getattr(self.options, attr).value]
 
     def _filler_names(self, count: int) -> list:
         count = max(0, count)
-        weights = [self.random.random() for _ in self.FILLER_NAMES]
-        names = self.random.choices(self.FILLER_NAMES, weights=weights, k=count)
-        # 33 % des "3 Start With Armor" / "60s of Infinite Armor" deviennent "6 Start With Armor" / "120s of Infinite Armor"
+        pool = self._active_filler_names()
+        weights = [self.random.random() for _ in pool]
+        names = self.random.choices(pool, weights=weights, k=count)
+        # 33 % des "3 Start With Armor" / "60s of Infinite Armor" deviennent leur variante x2.
+        # Ces variantes n'ont pas de toggle : elles n'existent que si leur filler de base est actif.
         return [roll_filler_name(n, self.random) for n in names]
 
     def _create_global_items(self, total_locations: int, ungroup: bool, consumed: list) -> None:
@@ -257,7 +281,7 @@ class CloneDroneWorld(World):
         excluded = set(SPLIT_PARENTS if ungroup else SPLIT_PARTS)
 
         # L'épée devient un item à trouver si on ne démarre pas (toujours) avec elle
-        need_sword = (weapon_mode == WEAPON_MODE_RANDOM
+        need_sword = (weapon_mode in (WEAPON_MODE_RANDOM, WEAPON_MODE_EVERY_DEATH)
                       or (weapon_mode == WEAPON_MODE_SAME and self.weapons[0] != WEAPON_SWORD))
         if not need_sword:
             excluded.add("SwordUnlock")
@@ -318,7 +342,8 @@ class CloneDroneWorld(World):
         candidates = {}
         for k in range(1, step_count + 1):
             names = list(base_names)
-            if weapon_mode != WEAPON_MODE_NONE and self.weapons[k - 1] != WEAPON_SWORD:
+            if weapon_mode == WEAPON_MODE_EVERY_DEATH or (
+                    weapon_mode != WEAPON_MODE_NONE and self.weapons[k - 1] != WEAPON_SWORD):
                 names.append("SwordUnlock")
             candidates[k] = [step_item_name(n, k) for n in names]
 
@@ -494,6 +519,7 @@ class CloneDroneWorld(World):
             "shop_discount_count": self._shop_discount_count(),
             "overpriced_shop": int(self.options.overpriced_shop.value),
             "randomize_starting_weapon": int(self.options.randomize_starting_weapon.value),
+            "include_bow": int(self.options.include_bow_in_weapon_randomization.value),
             "randomize_voices": int(self.options.randomize_voices.value),
             "normal": int(self.options.normal.value),
             "inferno": int(self.options.inferno.value),
