@@ -12,21 +12,29 @@ A Clone Drone in The Danger Zone Repository for Archipelago.
 ## Installation and Patch Procedures
 ### Windows
 
-1. Locate `Clone Drone in the Danger Zone.exe` and `Clone Drone in the Danger Zone_Data/`, they are in the same file. Starting now, this location will be the "root" (also called `./` when moving in files). You can locate it inside Steam <img width="424" height="322" alt="image" src="https://github.com/user-attachments/assets/1703c0d5-f979-4e24-93dd-273d96c1ebfa" />
+1. Locate `Clone Drone in the Danger Zone.exe` and `Clone Drone in the Danger Zone_Data/`, they are in the same file. Starting now, this location will be the "root" (also called `./` when moving in files). You can locate it inside Steam 
+<img width="424" height="322" alt="image" src="https://github.com/user-attachments/assets/1703c0d5-f979-4e24-93dd-273d96c1ebfa" />
 
-2. Close Steam entirely (DO NOT FORGET IN TASKBAR HIDDEN APPS, click "Leave Steam" or equivalent in your language, here French)<img width="469" height="861" alt="image" src="https://github.com/user-attachments/assets/84025ffe-4eb3-45ed-bde1-b158c6a84586" />
+2. Close Steam entirely (DO NOT FORGET IN TASKBAR HIDDEN APPS, click "Leave Steam" or equivalent in your language, here French)
+<img width="469" height="861" alt="image" src="https://github.com/user-attachments/assets/84025ffe-4eb3-45ed-bde1-b158c6a84586" />
 
-3. Drop all `BepInEx` (extracted) file in the root. This is the patcher, but you still need the patch.<img width="396" height="474" alt="image" src="https://github.com/user-attachments/assets/f1c14d11-59a0-4a00-b0d7-3b8d86649618" />
+3. Drop all `BepInEx` (extracted) file in the root. This is the patcher, but you still need the patch.
+<img width="396" height="474" alt="image" src="https://github.com/user-attachments/assets/f1c14d11-59a0-4a00-b0d7-3b8d86649618" />
 
-4. Create a new file `steam_appid.txt` in the root containing only "597170" (put Clone Drone in offline mode, so steam wont fuck everything up), in image: Japanese; check the number of character, it should says 6 characters (6文字 in Japanese) <img width="537" height="1087" alt="image" src="https://github.com/user-attachments/assets/37e4d936-7796-49f3-a765-e5cbc106a80d" />
+4. Create a new file `steam_appid.txt` in the root containing only "597170" (put Clone Drone in offline mode, so steam wont fuck everything up), in image: Japanese; check the number of character, it should says 6 characters (6文字 in Japanese) 
+<img width="537" height="1087" alt="image" src="https://github.com/user-attachments/assets/37e4d936-7796-49f3-a765-e5cbc106a80d" />
 
-5. Open `./BepInEx/` it should only contains "core".<img width="451" height="424" alt="image" src="https://github.com/user-attachments/assets/4747711a-143a-426b-81ea-04a2ba987876" />
+5. Open `./BepInEx/` it should only contains "core".
+<img width="451" height="424" alt="image" src="https://github.com/user-attachments/assets/4747711a-143a-426b-81ea-04a2ba987876" />
 
-6. Go back, open `Clone Drone in the Danger Zone.exe` and use menu "quit" button<img width="358" height="102" alt="image" src="https://github.com/user-attachments/assets/113c0004-2d86-4641-83a0-aa7559b0eb89" />
+6. Go back, open `Clone Drone in the Danger Zone.exe` and use menu "quit" button
+<img width="358" height="102" alt="image" src="https://github.com/user-attachments/assets/113c0004-2d86-4641-83a0-aa7559b0eb89" />
 
-7. Open `./BepInEx/` it should now contains 6 elements instead of 1<img width="417" height="369" alt="image" src="https://github.com/user-attachments/assets/95620d78-75db-4b5f-ab6a-9734061ecc4e" />
+7. Open `./BepInEx/` it should now contains 6 elements instead of 1
+<img width="417" height="369" alt="image" src="https://github.com/user-attachments/assets/95620d78-75db-4b5f-ab6a-9734061ecc4e" />
 
-8. Go in `./BepInEx/plugins/`, it should be empty. Put `CloneDroneAP.dll` in here<img width="435" height="229" alt="image" src="https://github.com/user-attachments/assets/1e9b5c51-09a7-46da-9385-a478be787d2a" />
+8. Go in `./BepInEx/plugins/`, it should be empty. Put `CloneDroneAP.dll` in here
+<img width="435" height="229" alt="image" src="https://github.com/user-attachments/assets/1e9b5c51-09a7-46da-9385-a478be787d2a" />
 
 9. Launch the game from `Clone Drone in the Danger Zone.exe` while Steam is closed.
 
