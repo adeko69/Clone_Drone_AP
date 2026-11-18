@@ -4,14 +4,18 @@ from Options import Choice, DeathLink, Toggle, PerGameCommonOptions, Range
 class CloneDroneGoal(Choice):
     """
     Goal:
-    - Get Titanium
-    - Get Uranium
-    - Get Insanium
+    - Reach Titanium (Step)
+    - Reach Uranium (Step)
+    - Reach Insanium (Step)
+    - Get Scrap (Scrap Collector): reach the Required Scrap. Steps, Multi-Step Keys and level checks are disabled,
+      and the Upgrade Mode is forced to Global Ungrouped.
+      The options of the "Step (Reach Goal)" group are ignored.
     """
     display_name = "Goal"
     option_titanium = 1
     option_uranium = 2
     option_insanium = 3
+    option_scrap_collector = 4
     default = 2
 
 class Steps(Range):
@@ -52,30 +56,112 @@ class SkillpointPrice(Range):
     range_end = 5
     default = 3
 
-class FillerNextUpgradeFree(Toggle):
-    """Generate "Next Upgrade Free" fillers."""
+# --- Fillers : un poids de 0 à 10 par filler (0 = jamais généré, 1 = poids minimal, 10 = poids maximal) ---
+# Les places vides du pool sont remplies par un tirage pondéré entre les fillers.
+
+class FillerFreeClone(Range):
+    """
+    Weight of the "Free Clone" filler (a free clone at the start of a level).
+    Always generated: from 1 (minimal weight) to 10 (maximal weight). 0 does not exist,
+    so there is always at least one filler to fill the empty locations.
+    At most 100 are generated; further draws become a "Small Scrap" (nothing, or +10 scrap with the scrap system).
+    """
+    display_name = "Free Clone"
+    range_start = 1
+    range_end = 10
+    default = 5
+
+class FillerNextUpgradeFree(Range):
+    """Weight of the "Next Upgrade Free" filler. 0 = never generated, 1 = minimal weight, 10 = maximal weight."""
     display_name = "Next Upgrade Free"
-    default = 1
+    range_start = 0
+    range_end = 10
+    default = 5
 
-class FillerStartWithArmor(Toggle):
-    """Generate "3 Start With Armor" fillers (and their 6x variant, rolled at 33%)."""
+class FillerStartWithArmor(Range):
+    """
+    Weight of the "3 Start With Armor" filler (33% become the "6 Start With Armor" variant).
+    0 = never generated, 1 = minimal weight, 10 = maximal weight.
+    """
     display_name = "3 Start With Armor"
-    default = 1
+    range_start = 0
+    range_end = 10
+    default = 5
 
-class FillerInfiniteArmor(Toggle):
-    """Generate "60s of Infinite Armor" fillers (and their 120s variant, rolled at 33%)."""
+class FillerInfiniteArmor(Range):
+    """
+    Weight of the "60s of Infinite Armor" filler (33% become the "120s of Infinite Armor" variant).
+    0 = never generated, 1 = minimal weight, 10 = maximal weight.
+    """
     display_name = "60s of Infinite Armor"
-    default = 1
+    range_start = 0
+    range_end = 10
+    default = 5
 
-class FillerEnergyBoost(Toggle):
-    """Generate "Progressive Energy Boost" fillers."""
+class FillerEnergyBoost(Range):
+    """Weight of the "Progressive Energy Boost" filler. 0 = never generated, 1 = minimal weight, 10 = maximal weight.
+    At most 100 are generated; further draws become a "Small Scrap"."""
     display_name = "Progressive Energy Boost"
-    default = 1
+    range_start = 0
+    range_end = 10
+    default = 5
 
-class FillerWeaponBoost(Toggle):
-    """Generate "Progressive Weapon Boost" fillers."""
+class FillerWeaponBoost(Range):
+    """Weight of the "Progressive Weapon Boost" filler. 0 = never generated, 1 = minimal weight, 10 = maximal weight.
+    At most 100 are generated; further draws become a "Small Scrap". The sword size is capped at x3."""
     display_name = "Progressive Weapon Boost"
-    default = 1
+    range_start = 0
+    range_end = 10
+    default = 5
+
+class FillerScrap(Range):
+    """
+    Weight of the "Scrap" filler: 500 scrap (20% become "Big Scrap": 5000 scrap at once).
+    Only generated with the Scrap Collector goal or Scrap Anywhere. In a Reach goal without scrap it is useless,
+    so it is never generated, whatever the weight.
+    0 = never generated, 1 = minimal weight, 10 = maximal weight.
+    """
+    display_name = "Scrap"
+    range_start = 0
+    range_end = 10
+    default = 5
+
+class FillerComboTime(Range):
+    """
+    Weight of the "Combo Time" filler: +0.5s on every combo (kill) and +1s on the 10 seconds after a new game, per copy.
+    Only generated if the scrap system is active (Scrap Collector or Scrap Anywhere).
+    0 = never generated, 1 = minimal weight, 10 = maximal weight.
+    """
+    display_name = "Combo Time"
+    range_start = 0
+    range_end = 10
+    default = 5
+
+class FillerPlainScrapGain(Range):
+    """
+    Weight of the "Plain Scrap Gain" filler: +1 scrap per kill (before the multipliers), per copy.
+    Only generated if the scrap system is active (Scrap Collector or Scrap Anywhere).
+    0 = never generated, 1 = minimal weight, 10 = maximal weight.
+    """
+    display_name = "Plain Scrap Gain"
+    range_start = 0
+    range_end = 10
+    default = 5
+
+class ScrapCoop(Range):
+    """
+    Co-op: share a part of the scrap you earn with the other co-op players of the room.
+    You keep 100% of what you earn; every other co-op player ALSO receives a copy of the shared part
+    (the scrap is duplicated, not taken from you). Works with the Scrap Collector goal and with Scrap Anywhere.
+    - 0: off (you neither share nor receive).
+    - 1: 20%   - 2: 40%   - 3: 60%   - 4: 80%   - 5: 100%
+    Only players with a value above 0 take part. The percentage is the one of the player who earns the scrap.
+    Scrap coming from "Scrap" / "Big Scrap" items is never shared.
+    """
+    display_name = "Scrap Coop"
+    range_start = 0
+    range_end = 5
+    default = 0
 
 class IncludeBowInWeaponRandomization(Toggle):
     """
@@ -338,6 +424,51 @@ class StepKeyLocation(Choice):
     option_absolutely_anywhere = 3
     default = 0
 
+class ScrapAnywhere(Toggle):
+    """
+    Only used with the Reach Titanium/Uranium/Insanium goals.
+    On: the Scrap Collector scrap system is also active in Step mode: the Scrap Location checks exist
+    and are obtained when the Required Scrap are passed (the goal itself stays the Step victory).
+    The Scrap Collector goal always uses the scrap system.
+    """
+    display_name = "Scrap Anywhere"
+    default = 0
+
+class HowMuchScrap(Choice):
+    """
+    Scrap required to win the game with the Scrap Collector goal.
+    Also the upper bound of the Scrap Location checks, if the scrap system is active.
+    With 1000k, 3 copies of "Combo Strength" and of "More Scrap" are generated; with 10000k, 6 copies of each (1 with 100k).
+    """
+    display_name = "Required Scrap"
+    option_100k = 0
+    option_1000k = 1
+    option_10000k = 2
+    default = 0
+
+class LocationPerScrapPercent(Range):
+    """
+    Percentage of the possible Scrap Location checks that are created (rounded up, minimum 1 check).
+    The possible checks are one every 1k, up to the Required Scrap amount (the goal itself is not a check).
+    Which multiples of 1k are kept is random, never twice the same.
+    Only used if the scrap system is active (Scrap Collector goal, or Scrap Anywhere).
+    """
+    display_name = "Scrap Location Percent"
+    range_start = 1
+    range_end = 100
+    default = 10
+
+
+class ScrapEarlyChecks(Range):
+    """
+    Scrap Collector goal only: number of "Early Checks" (low scrap checks that the fill fills with progression items first).
+    Each one sits at a random multiple of 10 scrap between 100 and 9990 included (never a multiple of 1000,
+    those belong to the normal Scrap Location checks), never twice the same.
+    """
+    display_name = "Early Checks"
+    range_start = 1
+    range_end = 100
+    default = 20
 
 @dataclass
 class CloneDroneOptions(PerGameCommonOptions):
@@ -356,11 +487,15 @@ class CloneDroneOptions(PerGameCommonOptions):
     multi_step_keys: MultiStepKeys
     step_key_location: StepKeyLocation
     randomize_voices: RandomizeLines
+    filler_free_clone: FillerFreeClone
     filler_next_upgrade_free: FillerNextUpgradeFree
     filler_start_with_armor: FillerStartWithArmor
     filler_infinite_armor: FillerInfiniteArmor
     filler_energy_boost: FillerEnergyBoost
     filler_weapon_boost: FillerWeaponBoost
+    filler_scrap: FillerScrap
+    filler_combo_time: FillerComboTime
+    filler_plain_scrap_gain: FillerPlainScrapGain
     normal: Normal
     inferno: Inferno
     jetpack: Sprinter
@@ -382,3 +517,8 @@ class CloneDroneOptions(PerGameCommonOptions):
     confusion_undead: ConfusionUndead
     confusion_doggos: ConfusionDoggos
     confusion_summoners: ConfusionSummoners
+    scrap_anywhere: ScrapAnywhere
+    required_scrap: HowMuchScrap
+    scrap_locations: LocationPerScrapPercent
+    scrap_early_checks: ScrapEarlyChecks
+    scrap_coop: ScrapCoop

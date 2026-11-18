@@ -17,8 +17,15 @@ from .scenarios import (
 BASE_LOCATION_ID = 72000
 STRIDE = 40
 GOAL_LEVELS = {1: 15, 2: 23, 3: 33, 4: 4}
-GOAL_NAMES = {1: "titanium", 2: "uranium", 3: "insanium", 4: "silver"}
+GOAL_NAMES = {1: "titanium", 2: "uranium", 3: "insanium", 4: "scrap_collector"}   # 4 : relu par le C# (avant : "silver")
+BASE_SCRAP_LOCATION_ID = 74000   # doit rester synchronisé avec locations.py
+SCRAP_STEP = 1000                # ID du check de scrap = BASE_SCRAP_LOCATION_ID + seuil / SCRAP_STEP
+# Système de scrap envoyé au jeu dans les DIZAINES du nombre après ":" du goal (le reste = keys_mode, 0..2) :
+# 0 = inactif, 10 = 100k, 20 = 1000k, 30 = 10000k. Ex. "scrap_collector:10", "uranium:21".
+SCRAP_TIER = {100_000: 1, 1_000_000: 2, 10_000_000: 3}
 KEY_ITEM = "Progressive Key"   # doit rester synchronisé avec items.py et le C# (ap_grant_item)
+COOP_STEP_PERCENT = 20          # option scrap_coop : 1 = 20 %, 2 = 40 % ... 5 = 100 %
+ITEM_BATCH_SIZE = 100           # items envoyés au jeu par connexion TCP (beaucoup d'items avec beaucoup de checks)
 
 # Les checks d'achat sont relatifs au step : une fois le step fini, ceux qui n'ont pas été faits ne peuvent plus l'être.
 # True = finir un step valide aussi tous ses checks d'achat restants, pour que les items qu'ils contiennent
@@ -28,6 +35,10 @@ RELEASE_STEP_CHECKS_ON_WIN = True
 KEY_NEXTFREE = "NextUpgradeFreeUsed"
 KEY_INFINITE_ARMOR = "InfiniteArmorUsed"
 KEY_START_CLONE = "StartCloneUsed"
+KEY_SCRAP = "ScrapEarned"         # scrap GAGNÉS en jeu (DataStorage) : survit au redémarrage du jeu ET du client
+# Items "Scrap" : ils ne sont PAS dans ce total (le jeu les recompte à chaque session, car tous les items lui sont renvoyés).
+# Valeurs dupliquées dans items.py et Class1.cs (ScrapItemValue / BigScrapItemValue).
+SCRAP_ITEM_VALUES = {"Scrap": 500, "Big Scrap": 5000, "Small Scrap": 10}
 
 
 def purchase_checks_of_step(step: int) -> list:
@@ -38,13 +49,17 @@ def purchase_checks_of_step(step: int) -> list:
 
 class Scene:
     """Une entrée par step : X = scénario (-1 = step terminé), Y = arme de départ (0 à 3).
-    Format texte : "X:Y;X:Y;..." (l'ancien format "X;X;..." est accepté, Y vaut alors 0)."""
+    Format texte : "X:Y;X:Y;..." (l'ancien format "X;X;..." est accepté, Y vaut alors 0).
 
-    def __init__(self, values, weapons=None):
+    Mode Scrap Collector (pool != None) : pas de step. Le texte est juste la liste des scénarios activés
+    ("0:1:2:3") ; le jeu en tire un à chaque niveau. L'objet garde un seul step qui ne se termine jamais."""
+
+    def __init__(self, values, weapons=None, pool=None):
         self.values = values
         if weapons is None or len(weapons) != len(values):
             weapons = [0] * len(values)
         self.weapons = weapons
+        self.pool = pool
 
     @classmethod
     def parse(cls, s: str):
@@ -58,7 +73,20 @@ class Scene:
             weapons.append(int(y) if y.strip() else 0)
         return cls(values, weapons)
 
+    @classmethod
+    def parse_pool(cls, s: str):
+        """Scrap Collector : "0:1:2:3" (ou "0;1;2;3") -> liste des scénarios, sans doublon."""
+        pool = []
+        for part in s.replace(";", ":").split(":"):
+            if part.strip().lstrip("-").isdigit() and int(part) not in pool:
+                pool.append(int(part))
+        if not pool:
+            pool = [0]
+        return cls([pool[0]], None, pool)
+
     def __str__(self):
+        if self.pool is not None:
+            return ":".join(str(p) for p in self.pool)
         return ";".join(f"{x}:{y}" for x, y in zip(self.values, self.weapons))
 
     @property
@@ -126,6 +154,7 @@ class CloneDroneContext(CommonContext):
         self.include_bow = 1       # option include_bow_in_weapon_randomization
         super().__init__(server_address, password)
         self.items_sent_to_game = 0
+        self.items_lock = asyncio.Lock()   # un seul envoi d'items à la fois (sinon doublons)
         self.scene = None
         self.session_info = None   # (slot, room, goal) une fois connecté à Archipelago
         self.skillpoint_price = 3  # multiplicateur de prix de départ (option skillpoint_price)
@@ -133,6 +162,13 @@ class CloneDroneContext(CommonContext):
         self.overpriced_shop = 0   # nombre d'upgrades à +3 skillpoints, retirées au hasard à chaque mort (0 = désactivé)
         self.goal_n = GOAL_LEVELS[2]
         self.keys_mode = 0         # option multi_step_keys (0 = non, 1 = sans le dernier, 2 = avec le dernier)
+        self.scrap_collector = False   # goal Scrap Collector : la victoire = atteindre required_scrap (pas de niveaux)
+        self.scrap_enabled = False  # système de scrap actif (Scrap Collector, ou Scrap Anywhere)
+        self.scrap_coop = 0         # co-op : 0 = off, 1..5 = 20..100 % des scrap gagnés DUPLIQUÉS vers les autres joueurs co-op
+        self.coop_contribs = {}     # {slot (str): scrap partagés par ce joueur}, lu dans le DataStorage (commun à la room)
+        self.required_scrap = 0
+        self.scrap_thresholds = []   # seuils actifs de cette seed, un check "Scrap Check - <seuil>" chacun
+        self.scrap_earned = 0       # plus haut total de scrap GAGNÉS reçu du jeu (ou lu dans le DataStorage), items Scrap exclus
         self.used = {KEY_NEXTFREE: 0, "StartWithArmorUsed": 0, KEY_INFINITE_ARMOR: 0, KEY_START_CLONE: 0}
 
         # Démarre le serveur TCP local immédiatement pour écouter le jeu, même hors connexion
@@ -164,13 +200,21 @@ class CloneDroneContext(CommonContext):
             goal_value = slot_data.get("goal", 2)
             self.goal_n = GOAL_LEVELS.get(goal_value, 23)
             self.keys_mode = int(slot_data.get("multi_step_keys", 0))   # anciennes seeds : pas de clé
+            self.scrap_collector = bool(slot_data.get("scrap_collector", 0))
+            self.scrap_enabled = bool(slot_data.get("scrap_enabled", 0))
+            self.scrap_coop = max(0, min(5, int(slot_data.get("scrap_coop", 0))))   # anciennes seeds : true = 1 (20 %)
+            self.coop_contribs = {}
+            self.scrap_earned = 0   # propre à CE slot : sinon, en changeant de slot dans le même client, le total de l'ancien slot est repris
+            self.required_scrap = int(slot_data.get("required_scrap", 0))
+            self.scrap_thresholds = [int(t) for t in slot_data.get("scrap_thresholds", [])]
 
             slot_name = self.auth or "UnknownSlot"
             room_name = getattr(self, "seed_name", None) or "DefaultRoom"
 
             scene_str = slot_data.get("scene")
             if scene_str:
-                self.scene = Scene.parse(scene_str)          # source de vérité : la seed
+                # source de vérité : la seed
+                self.scene = Scene.parse_pool(scene_str) if self.scrap_collector else Scene.parse(scene_str)
             else:
                 # Anciennes seeds sans "scene" : repli sur un tirage déterministe
                 scenarios = []
@@ -199,7 +243,9 @@ class CloneDroneContext(CommonContext):
                 if win_step_location_id(r + 1) in checked:
                     self.scene.mark_done()
 
-            goal_str = f"{GOAL_NAMES.get(goal_value, 'uranium')}:{self.keys_mode}"   # ex. "uranium:1", relu par le C#
+            tier = SCRAP_TIER.get(self.required_scrap, 0) if self.scrap_enabled else 0
+            # ex. "uranium:1" (clés), "scrap_collector:10" (100k), "uranium:21" (1000k + clés) : le C# décode % 10 et / 10
+            goal_str = f"{GOAL_NAMES.get(goal_value, 'uranium')}:{self.keys_mode + 10 * tier}"
             self.skillpoint_price = int(slot_data.get("skillpoint_price", 3))   # anciennes seeds : 3
             self.overpriced_shop = int(slot_data.get("overpriced_shop", 0))     # anciennes seeds : désactivé
             self.confusion = ",".join(str(int(slot_data.get(f"confusion_{n}", 0)))   # anciennes seeds : 0
@@ -212,7 +258,7 @@ class CloneDroneContext(CommonContext):
             self.items_sent_to_game = 0
 
             self.used = {KEY_NEXTFREE: 0, "StartWithArmorUsed": 0, KEY_INFINITE_ARMOR: 0, KEY_START_CLONE: 0}
-            keys = [self.storage_key(KEY_NEXTFREE), self.storage_key("StartWithArmorUsed"), self.storage_key(KEY_INFINITE_ARMOR), self.storage_key(KEY_START_CLONE)]
+            keys = [self.storage_key(KEY_NEXTFREE), self.storage_key("StartWithArmorUsed"), self.storage_key(KEY_INFINITE_ARMOR), self.storage_key(KEY_START_CLONE), self.storage_key(KEY_SCRAP), self.coop_key()]
             asyncio.create_task(self.send_msgs([
                 {"cmd": "SetNotify", "keys": keys},
                 {"cmd": "Get", "keys": keys},
@@ -224,13 +270,16 @@ class CloneDroneContext(CommonContext):
                 changed = self.apply_storage_value(key, value) or changed
             if changed:
                 asyncio.create_task(send_used_to_game(self))
+            asyncio.create_task(coop_sync(self))
 
         elif cmd == "SetReply":
             if self.apply_storage_value(args.get("key"), args.get("value")):
                 asyncio.create_task(send_used_to_game(self))
+                asyncio.create_task(coop_sync(self))
 
         elif cmd == "ReceivedItems":
             asyncio.create_task(send_pending_items_to_game(self))
+            asyncio.create_task(check_scrap(self))   # un item Scrap / Big Scrap peut débloquer des paliers
 
     def item_name_for(self, item_id: int, slot: int) -> str:
         """Nom d'un item dans le jeu du slot receveur (les IDs dépendent du jeu du receveur)."""
@@ -277,6 +326,10 @@ class CloneDroneContext(CommonContext):
                 logger.warning(f"[Notif] ItemSend ignoré : {e}")
         super().on_print_json(args)
 
+    def scrap_bonus(self) -> int:
+        """Scrap apportés par les items "Scrap" (500) et "Big Scrap" (5000) reçus."""
+        return sum(SCRAP_ITEM_VALUES.get(self.item_names.lookup_in_game(n.item), 0) for n in self.items_received)
+
     def keys_received(self) -> int:
         """Nombre de "Progressive Key" reçues."""
         return sum(1 for n in self.items_received if self.item_names.lookup_in_game(n.item) == KEY_ITEM)
@@ -284,7 +337,33 @@ class CloneDroneContext(CommonContext):
     def storage_key(self, name: str) -> str:
         return f"CloneDrone_{self.team}_{self.slot}_{name}"
 
+    def coop_key(self) -> str:
+        """Clé COMMUNE à toute la room (pas de slot) : {slot: contribution au pool}."""
+        return f"CloneDrone_{self.team}_ScrapCoop"
+
+    def scrap_coop_percent(self) -> int:
+        """Pourcentage de MES scrap gagnés partagés avec les autres joueurs co-op (0 = co-op désactivé)."""
+        return self.scrap_coop * COOP_STEP_PERCENT if self.scrap_enabled else 0
+
+    def scrap_coop_shared(self) -> int:
+        """Scrap que je partage : X % de mes scrap gagnés (arrondi à l'inférieur)."""
+        return self.scrap_earned * self.scrap_coop_percent() // 100
+
+    def scrap_coop_adjust(self) -> int:
+        """Co-op : scrap reçus des AUTRES joueurs co-op (la somme de ce qu'ils partagent).
+        Je garde 100 % de mes propres scrap : rien n'est retiré, les scrap partagés sont dupliqués."""
+        if not self.scrap_coop_percent():
+            return 0
+        mine = str(self.slot)
+        return sum(v for k, v in self.coop_contribs.items() if k != mine)
+
     def apply_storage_value(self, key, value) -> bool:
+        if key == self.coop_key():
+            self.coop_contribs = {str(k): int(v) for k, v in (value or {}).items()}
+            return True
+        if key == self.storage_key(KEY_SCRAP):
+            self.scrap_earned = max(self.scrap_earned, int(value or 0))   # jamais à la baisse
+            return True
         for name in (KEY_NEXTFREE, "StartWithArmorUsed", KEY_INFINITE_ARMOR, KEY_START_CLONE):
             if key == self.storage_key(name):
                 self.used[name] = int(value or 0)
@@ -295,6 +374,45 @@ class CloneDroneContext(CommonContext):
         ui = super().make_gui()
         ui.base_title = "Clone Drone Archipelago Client"
         return ui
+
+
+BASE_SCRAP_LOW_LOCATION_ID = 84000   # doit rester synchronisé avec locations.py
+
+
+def scrap_location_id(t: int) -> int:
+    """ID du check d'un seuil : multiples de 1000 = palier normal, multiples de 10 = check "bas" (Scrap Collector)."""
+    if t % SCRAP_STEP:
+        return BASE_SCRAP_LOW_LOCATION_ID + t // 10
+    return BASE_SCRAP_LOCATION_ID + t // SCRAP_STEP
+
+
+async def coop_sync(ctx):
+    """Co-op : publie la part de mes scrap gagnés que je partage, prévient le jeu de ce que les autres m'ont donné, puis revérifie."""
+    if ctx.scrap_coop_percent() and ctx.server and ctx.slot:
+        contrib = ctx.scrap_coop_shared()
+        if ctx.coop_contribs.get(str(ctx.slot), -1) < contrib:
+            await ctx.send_msgs([{
+                "cmd": "Set", "key": ctx.coop_key(), "default": {}, "want_reply": False,
+                "operations": [{"operation": "update", "value": {str(ctx.slot): contrib}}],
+            }])
+        await send_raw_to_game(f"COOP:{ctx.scrap_coop_adjust()}\n")
+    await check_scrap(ctx)
+
+
+async def check_scrap(ctx):
+    """Coche les paliers de scrap atteints et valide la victoire du Scrap Collector.
+    Total = scrap gagnés (jeu) + scrap des items Scrap / Big Scrap reçus. check_locations est idempotent."""
+    if not ctx.scrap_enabled:
+        return
+    total = ctx.scrap_earned + ctx.scrap_bonus() + ctx.scrap_coop_adjust()
+    ids = [scrap_location_id(t) for t in ctx.scrap_thresholds if total >= t]
+    to_check = [i for i in ids if i in ctx.server_locations]
+    if to_check and ctx.server and ctx.slot:
+        await ctx.check_locations(to_check)
+    if ctx.scrap_collector and total >= ctx.required_scrap and not ctx.finished_game:
+        ctx.finished_game = True
+        await ctx.send_msgs([{"cmd": "StatusUpdate", "status": ClientStatus.CLIENT_GOAL}])
+        logger.info("Objectif atteint ! Scrap requis atteints.")
 
 
 async def bump_storage(ctx, name: str):
@@ -314,6 +432,8 @@ async def send_used_to_game(ctx):
         f"USED:StartArmor:{ctx.used['StartWithArmorUsed']}\n"
         f"USED:60sInfiniteArmor:{ctx.used[KEY_INFINITE_ARMOR]}\n"
         f"USED:StartClone:{ctx.used[KEY_START_CLONE]}\n"
+        f"USED:Scrap:{ctx.scrap_earned}\n"   # le jeu repart de 0 à chaque démarrage : on lui rend ses scrap gagnés
+        + (f"COOP:{ctx.scrap_coop_adjust()}\n" if ctx.scrap_coop else "")
     )
 
 
@@ -365,18 +485,22 @@ async def send_notif_to_game(text: str):
 
 
 async def send_pending_items_to_game(ctx: CloneDroneContext):
-    while ctx.items_sent_to_game < len(ctx.items_received):
-        network_item = ctx.items_received[ctx.items_sent_to_game]
-        item_name = ctx.item_names.lookup_in_game(network_item.item)
-        try:
-            reader, writer = await asyncio.open_connection('127.0.0.1', 38282)
-            writer.write(f"{item_name}\n".encode('utf-8'))
-            await writer.drain()
-            writer.close()
-            await writer.wait_closed()
-            ctx.items_sent_to_game += 1
-        except Exception:
-            break
+    # Par paquets : avec des milliers de checks il y a des milliers d'items, une connexion par item serait très lente.
+    # Le verrou évite que deux tâches (ReceivedItems + game_watcher) envoient le même paquet deux fois.
+    async with ctx.items_lock:
+        while ctx.items_sent_to_game < len(ctx.items_received):
+            start = ctx.items_sent_to_game
+            batch = ctx.items_received[start:start + ITEM_BATCH_SIZE]
+            names = [ctx.item_names.lookup_in_game(n.item) for n in batch]
+            try:
+                reader, writer = await asyncio.open_connection('127.0.0.1', 38282)
+                writer.write(("\n".join(names) + "\n").encode('utf-8'))
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                ctx.items_sent_to_game = start + len(batch)
+            except Exception:
+                break
 
 
 async def handle_game_check(reader, writer, ctx: CloneDroneContext):
@@ -432,7 +556,25 @@ async def handle_game_check(reader, writer, ctx: CloneDroneContext):
             if loc_id and ctx.server and ctx.slot and loc_id in ctx.server_locations:
                 await ctx.check_locations([loc_id])
 
-    elif message.isdigit():
+    elif message.startswith("SCRAP:"):
+        # Le jeu envoie ses scrap GAGNÉS ("SCRAP:<gagnés>"), sans les items Scrap : le total = gagnés + items (voir check_scrap).
+        parts = message.split(":")
+        if ctx.scrap_enabled and len(parts) == 2 and parts[1].isdigit():
+            scrap = int(parts[1])
+            if scrap > ctx.scrap_earned:
+                ctx.scrap_earned = scrap
+                if ctx.server and ctx.slot:
+                    # "max" : le serveur garde le plus grand total (jamais à la baisse, même avec des messages dans le désordre)
+                    await ctx.send_msgs([{
+                        "cmd": "Set",
+                        "key": ctx.storage_key(KEY_SCRAP),
+                        "default": 0,
+                        "want_reply": False,
+                        "operations": [{"operation": "max", "value": scrap}],
+                    }])
+            await coop_sync(ctx)
+
+    elif message.isdigit() and not ctx.scrap_collector:   # en Scrap Collector, il n'y a pas de niveaux : pas de victoire par niveau
         # Le mod envoie juste le niveau gagné
         level = int(message)
         loc_ids, victory, changed = resolve_check(ctx.scene, ctx.goal_n, level, ctx.keys_mode, ctx.keys_received())

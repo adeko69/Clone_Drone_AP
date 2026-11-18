@@ -150,29 +150,240 @@ namespace CloneDroneAP
         }
     }
 
+    class ScrapCollector
+    {
+        // --- Config (remplie par HandleSession) ---
+        public static bool Active = false;        // système de scrap actif (goal Scrap Collector ou Scrap Anywhere)
+        public static long RequiredScrap = 0;
+
+        // --- État ---
+        // Earned = scrap GAGNÉS en tuant (validés ; persistés côté client et rendus par "USED:Scrap:" après un redémarrage).
+        // Bonus  = scrap des items "Scrap" (500) / "Big Scrap" (5000) reçus. Remis à 0 à chaque SESSION : le client renvoie
+        //          alors tous les items, qui sont recomptés (sinon ils seraient comptés deux fois).
+        // Total  = ce que voit le joueur. Le client reçoit seulement Earned et ajoute lui-même les items.
+        public static long Earned = 0;
+        public static long Bonus = 0;
+        public static long Total { get { return Math.Max(0L, Earned + Bonus + CoopAdjust); } }
+        public const long ScrapItemValue = 500;       // doit rester synchronisé avec items.py / client.py
+        public const long BigScrapItemValue = 5000;
+        public const long SmallScrapItemValue = 10;   // "Small Scrap" : +10 si le système de scrap est actif, sinon rien
+        public static long Pending = 0;           // gagnés depuis la dernière validation (niveau gagné / mort)
+        static float multiplier = 1f;
+        static float comboRemaining = 0f;                 // temps restant du combo (s) ; il ne baisse qu'en combat
+        // Items Scrap Collector reçus (recomptés à chaque SESSION : tous les items sont renvoyés)
+        public static int ComboStrengthCount = 0;         // +0.1x de multiplicateur de combo par kill, par exemplaire
+        public static int MoreScrapCount = 0;             // +1x sur tous les kills (appliqué en même temps que mult et multiplier)
+        public static int ComboTimeCount = 0;             // +0.5 s par combo (kill) et +1 s sur les 10 s de reprise, par exemplaire
+        public static int PlainScrapCount = 0;            // +1 scrap par kill, avant les multiplicateurs
+        public static long CoopAdjust = 0;                // co-op : scrap reçus des AUTRES joueurs co-op (donné par le client, jamais négatif : on garde 100 % des siens)
+        static float ComboKillSeconds { get { return 5f + 0.5f * ComboTimeCount; } }     // un kill garantit au moins 5 s de combo
+        static float ComboResumeSeconds { get { return 10f + 1f * ComboTimeCount; } }    // hors combat, le chrono est tenu à 10 s
+        static long lastSent = -1;
+
+        private static readonly Dictionary<EnemyType, byte> score_list =
+                new Dictionary<EnemyType, byte>
+            {
+                { EnemyType.Swordsman1, 1},
+                { EnemyType.Bowman1, 1},
+                { EnemyType.SummonWalker, 4},
+                { EnemyType.Swordsman2, 2 },
+                { EnemyType.Swordsman3, 3 },
+                { EnemyType.Bowman2, 2 },
+                { EnemyType.Bowman3, 3 },
+                { EnemyType.Spidertron5000, 5 },
+                { EnemyType.Sprinter1, 4 },
+                { EnemyType.Sprinter2, 5 },
+                { EnemyType.SprinterBowman, 5 },
+                { EnemyType.Spidertron6000, 6 },
+                { EnemyType.Bowman2_Stationary, 3 },
+                { EnemyType.Hammer1, 2 },
+                { EnemyType.Hammer2, 3 },
+                { EnemyType.Hammer3, 4 },
+                { EnemyType.JetpackHammer, 4 },
+                { EnemyType.Swordsman4, 4 },
+                { EnemyType.Bowman4, 4 },
+                { EnemyType.Bowman4_Stationary, 4 },
+                { EnemyType.KickBot, 3 },
+                { EnemyType.Swordsman5, 6 },
+                { EnemyType.Bowman5, 6 },
+                { EnemyType.FireRaptor, 4 },
+                { EnemyType.BusinessSword, 2 },
+                { EnemyType.BusinessHammer, 3 },
+                { EnemyType.FleetOverseer, 5 },
+                { EnemyType.BusinessJetpack, 3 },
+                { EnemyType.Spear1, 1 },
+                { EnemyType.Spear2, 2 },
+                { EnemyType.Spear3, 3 },
+                { EnemyType.Spear4, 4 },
+                { EnemyType.JetpackSpear1, 2 },
+                { EnemyType.JetpackSpear2, 3 },
+                { EnemyType.FleetAnalysisBot1, 4 },
+                { EnemyType.FleetAnalysisBot2, 4 },
+                { EnemyType.FleetAnalysisBot3, 4 },
+                { EnemyType.FleetAnalysisBot4, 4 },
+                { EnemyType.FleetCaptain, 5 },
+                { EnemyType.Hammer5, 5 },
+                { EnemyType.Spear5, 5 },
+                { EnemyType.LaserRaptor, 6 },
+                { EnemyType.KickBot2, 4 },
+                { EnemyType.FleetCaptain2, 5 },
+                { EnemyType.FleetCaptain3, 5 },
+                { EnemyType.FleetCaptain4, 5 },
+                { EnemyType.FleetCaptain5, 5 },
+                { EnemyType.FleetCaptain6, 5 },
+                { EnemyType.Zombie1, 1 },
+                { EnemyType.Zombie2, 2 },
+                { EnemyType.Zombie3, 3 },
+                { EnemyType.Zombie4, 4 },
+                { EnemyType.SawbladeUnicycle, 3},
+                { EnemyType.ZombieArcher1, 2 },
+                { EnemyType.ZombieArcher2, 3 },
+                { EnemyType.ZombieJetpack1, 2 },
+                { EnemyType.ZombieRaptor, 4 },
+                { EnemyType.ZombieFleetCaptain, 5 },
+                { EnemyType.SawDog, 4 },
+                { EnemyType.Sawberus, 6 }
+            };
+
+        // tier : dizaines du nombre envoyé par le client (0 = inactif, 1 = 100k, 2 = 1000k, 3 = 10000k)
+        public static void Configure(bool goalMode, int tier, bool newRun)
+        {
+            Active = tier > 0;
+            RequiredScrap = tier == 1 ? 100000L : tier == 2 ? 1000000L : tier == 3 ? 10000000L : 0L;
+            Bonus = 0;
+            ComboStrengthCount = 0; MoreScrapCount = 0; ComboTimeCount = 0; PlainScrapCount = 0; CoopAdjust = 0;
+            if (newRun) { Earned = 0; Pending = 0; }
+            multiplier = 1f;
+            comboRemaining = 0f;
+            lastSent = -1;
+        }
+
+        public static void GetScore(EnemyType type)
+        {
+            if (!Active || LevelManager.Instance == null) return;
+            byte leo;
+            if (!score_list.TryGetValue(type, out leo) || leo == 0) leo = 1;
+            int baseScrap = (1 << (leo + 1)) + PlainScrapCount;                // 4 .. 128 (+1 par "Plain Scrap Gain", avant les multiplicateurs)
+            float mult = UnityEngine.Random.Range(100, 201) / 100f;
+            mult *= LevelManager.Instance.GetNumberOfLevelsWon() * 0.05f + 1f;
+            comboRemaining = Math.Max(comboRemaining, ComboKillSeconds);       // (l'expiration est gérée par Tick)
+            Pending += Math.Max(0L, (long)((baseScrap * (mult * multiplier)) * (1 + (MoreScrapCount * 0.5f))));
+            multiplier += leo / 10f + 0.1f * ComboStrengthCount;                                  // "Combo Strength" : +0.1x par kill, par exemplaire
+        }
+
+        // Valide les scrap gagnés et prévient le client (qui coche les paliers et vérifie la victoire)
+        public static void Commit()
+        {
+            if (!Active) return;
+            Earned += Pending;
+            Pending = 0;
+            if (Earned != lastSent)
+            {
+                lastSent = Earned;
+                Plugin.SendToClient("SCRAP:" + Earned);
+            }
+        }
+
+        // Item "Scrap" / "Big Scrap" reçu (le client compte aussi les items de son côté pour les paliers et la victoire)
+        public static void AddBonus(long amount)
+        {
+            Bonus += amount;
+        }
+
+        // Scrap gagnés rendus par le client (DataStorage) après un redémarrage du jeu : jamais à la baisse
+        public static void Restore(long earned)
+        {
+            if (earned > Earned)
+            {
+                Earned = earned;
+                lastSent = earned;   // le client le connaît déjà : inutile de le lui renvoyer
+            }
+        }
+
+        // Renvoie les scrap gagnés au client (après une reconnexion / un nouveau SESSION)
+        public static void Resend()
+        {
+            if (Active && Earned > 0)
+            {
+                lastSent = Earned;
+                Plugin.SendToClient("SCRAP:" + Earned);
+            }
+        }
+
+        // Appelé à chaque frame par Plugin.Update.
+        // Hors combat (menu d'upgrade, entre deux vagues, début de niveau...) : le chrono est tenu à 10 s, le combo ne baisse pas.
+        // En combat : le chrono descend ; à 0 le combo est perdu. Il repart donc de 10 s dès que IsInCombat() redevient vrai.
+        public static void Tick(float dt, bool inCombat)
+        {
+            if (!Active || multiplier <= 1f) return;
+
+            if (!inCombat)
+            {
+                if (comboRemaining < ComboResumeSeconds) comboRemaining = ComboResumeSeconds;
+                return;
+            }
+
+            comboRemaining -= dt;
+            if (comboRemaining <= 0f)
+            {
+                comboRemaining = 0f;
+                multiplier = 1f;
+            }
+        }
+
+        // Mort du joueur : le combo est perdu
+        public static void ResetCombo()
+        {
+            multiplier = 1f;
+            comboRemaining = 0f;
+        }
+
+        // Combo en cours (il reste affiché entre deux niveaux)
+        public static bool ComboActive
+        {
+            get { return Active && multiplier > 1f; }
+        }
+
+        // "Combo: 1.2x 2.25s" (multiplicateur du prochain kill, temps restant avant la fin du combo)
+        public static string ComboLine()
+        {
+            System.Globalization.CultureInfo inv = System.Globalization.CultureInfo.InvariantCulture;
+            return "Combo: " + multiplier.ToString("0.0", inv) + "x " + Math.Max(0f, comboRemaining).ToString("0.00", inv) + "s";
+        }
+
+        public static string HudLine()
+        {
+            string s = "Scrap: " + Total.ToString("N0");
+            if (Pending > 0) s += " (+" + Pending.ToString("N0") + ")";
+            if (RequiredScrap > 0) s += " / " + RequiredScrap.ToString("N0");
+            return s;
+        }
+    }
+
     [BepInPlugin("com.tonnom.clonedrone.ap", "Clone Drone Archipelago", "1.0.0")]
     public class Plugin : BaseUnityPlugin
     {
         public static ManualLogSource Log;
         public static bool RandomizeVoices = false;
         public static bool IsReceivingFromArchipelago = false;
-        public static byte TotalFreeUpgradesReceived = 0;
-        public static byte NextUpgradesFree = 0;
-        public static byte NextFreeUsed = 0;
-        public static byte TotalStartArmorReceived = 0;
-        public static byte StartArmorUsed = 0;
-        public static byte StartWithArmor_left = 0;
-        public static Dictionary<byte, byte> StepShopDiscounts = new Dictionary<byte, byte>();
-        public static byte ShopPriceReduction = 0;
-        public static byte OverpricedShop = 0;
+        // Tous les compteurs d'items sont des int (plus de limite de 255 avec la multiplication des checks)
+        public static int TotalFreeUpgradesReceived = 0;
+        public static int NextUpgradesFree = 0;
+        public static int NextFreeUsed = 0;
+        public static int TotalStartArmorReceived = 0;
+        public static int StartArmorUsed = 0;
+        public static int StartWithArmor_left = 0;
+        public static Dictionary<int, int> StepShopDiscounts = new Dictionary<int, int>();
+        public static int ShopPriceReduction = 0;
+        public static int OverpricedShop = 0;
         public static HashSet<UpgradesClass> OverpricedShop_map = new HashSet<UpgradesClass> { };
         public static int MaxShopDiscount = 3;
 
         public static Dictionary<int, bool> LocalChecks = new Dictionary<int, bool>();
         public static List<UpgradeType> UnlockedUpgrades = new List<UpgradeType>();
         public static Dictionary<int, List<UpgradeType>> StepUnlockedUpgrades = new Dictionary<int, List<UpgradeType>>();
-        public static byte HammerLevelsGlobal = 0;
-        public static Dictionary<byte, byte> StepHammerLevels = new Dictionary<byte, byte>();
+        public static int HammerLevelsGlobal = 0;
+        public static Dictionary<int, int> StepHammerLevels = new Dictionary<int, int>();
         public static ConcurrentQueue<string> PendingItems = new ConcurrentQueue<string>();
         private static TcpListener tcpServer;
         private static Thread listenerThread;
@@ -183,7 +394,7 @@ namespace CloneDroneAP
         public static int KeysMode = 0;
         public static int KeysReceived = 0;
         public static int LockedStep = 0;
-        public static bool StepKeyRequired(byte step)
+        public static bool StepKeyRequired(int step)
         {
             return KeysMode == 2 || (KeysMode == 1 && step < Scene.Count);
         }
@@ -247,7 +458,6 @@ namespace CloneDroneAP
             if (IncludeBow) pool.Add(Weapons.WeaponBow);
             _everyDeathWeapon = pool[UnityEngine.Random.Range(0, pool.Count)];
 
-            if (ApHud.Instance != null) ApHud.Instance.Push("Weapon: " + WeaponName((int)_everyDeathWeapon));
         }
 
         private static void RecomputeSceneCache()
@@ -306,7 +516,7 @@ namespace CloneDroneAP
             byte confusion;
             if (scenario == CurrentScenario) return false;
             if (!Confusion.TryGetValue(scenario, out confusion) || confusion == 0) return false;
-            return UnityEngine.Random.Range(1, 101) <= confusion; 
+            return UnityEngine.Random.Range(1, 101) <= confusion;
         }
 
         public static sbyte GetGoalLevel()
@@ -316,12 +526,64 @@ namespace CloneDroneAP
                 case "titanium": return 15;
                 case "uranium": return 23;
                 case "insanium": return 33;
-                default: return -1;
+                default: return -1;   // "scrap_collector" : pas de niveau-goal, la partie ne s'arrête jamais d'elle-même
             }
+        }
+
+        // Scrap Collector : la Scene reçue est juste la liste des scénarios activés ("0:1:2:3" = les 4 premiers).
+        // Le jeu en tire un à chaque niveau. Il n'y a qu'un seul step qui ne se termine jamais :
+        // Scene garde donc UNE entrée (le scénario courant), ce qui laisse tout le code "step" fonctionner tel quel.
+        public static List<Scenario> ScrapPool = new List<Scenario>();
+
+        private static void LoadScrapPool(string s)
+        {
+            List<Scenario> pool = new List<Scenario>();
+            if (!string.IsNullOrEmpty(s))
+            {
+                foreach (string part in s.Split(new[] { ':', ';' }))
+                {
+                    int x;
+                    if (int.TryParse(part.Trim(), out x) && x >= 0 && x <= (int)Scenario.Summoners && !pool.Contains((Scenario)x))
+                        pool.Add((Scenario)x);
+                }
+            }
+            if (pool.Count == 0) pool.Add(Scenario.Normal);
+
+            ScrapPool = pool;
+            Scene = new List<Scenario> { pool[UnityEngine.Random.Range(0, pool.Count)] };
+            SceneWeapons = new List<Weapons> { Weapons.WeaponSword };
+            RecomputeSceneCache();
+            RefreshUpgradeShop();
+        }
+
+        // Fin de niveau : nouveau scénario tiré dans la liste. Il est enregistré comme un scénario normal
+        // (CurrentScenario) : les patches existants le lisent tels quels. On évite de retomber sur le scénario
+        // en cours quand il y a le choix ; retire le "!= current" pour autoriser les répétitions.
+        public static void RerollScenarioIfNeeded()
+        {
+            if (CurrentGoal != "scrap_collector" || ScrapPool.Count == 0 || Scene.Count == 0) return;
+
+            Scenario current = Scene[0];
+            List<Scenario> choices = new List<Scenario>();
+            foreach (Scenario sc in ScrapPool)
+            {
+                if (sc != current) choices.Add(sc);
+            }
+            if (choices.Count == 0) return;
+
+            Scene[0] = choices[UnityEngine.Random.Range(0, choices.Count)];
+            RecomputeSceneCache();
+            Log.LogInfo($"[AP SCENE] Scenario re-rolled : {current} -> {Scene[0]}");
         }
 
         public static void LoadScene(string s)
         {
+            if (CurrentGoal == "scrap_collector")
+            {
+                LoadScrapPool(s);
+                return;
+            }
+
             List<Scenario> scenarios = new List<Scenario>();
             List<Weapons> weapons = new List<Weapons>();
             if (!string.IsNullOrEmpty(s))
@@ -347,6 +609,9 @@ namespace CloneDroneAP
 
         public static string SceneToString()
         {
+            if (CurrentGoal == "scrap_collector")
+                return string.Join(":", ScrapPool.Select(p => ((int)p).ToString()).ToArray());
+
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < Scene.Count; i++)
             {
@@ -396,12 +661,12 @@ namespace CloneDroneAP
             get { return Scene.Count > 0 && !SceneComplete && CurrentWeapon != Weapons.WeaponSword; }
         }
 
-        public static byte CurrentStepNumber
+        public static int CurrentStepNumber
         {
             get
             {
                 if (Scene.Count == 0) return 0;
-                return SceneComplete ? (byte)Scene.Count : (byte)(_finishedSteps + 1);
+                return SceneComplete ? Scene.Count : _finishedSteps + 1;
             }
         }
 
@@ -416,8 +681,8 @@ namespace CloneDroneAP
         {
             get
             {
-                byte stepLevels;
-                StepHammerLevels.TryGetValue((byte)CurrentStepNumber, out stepLevels);
+                int stepLevels;
+                StepHammerLevels.TryGetValue(CurrentStepNumber, out stepLevels);
                 return HammerLevelsGlobal + stepLevels;
             }
         }
@@ -426,7 +691,7 @@ namespace CloneDroneAP
         {
             get
             {
-                byte stepCount;
+                int stepCount;
                 StepShopDiscounts.TryGetValue(CurrentStepNumber, out stepCount);
                 return Mathf.Min(MaxShopDiscount, ShopPriceReduction + stepCount);
             }
@@ -438,14 +703,14 @@ namespace CloneDroneAP
             return IsUpgradeUnlocked(type);
         }
 
-        public static string SplitStepSuffix(string itemName, out byte step)
+        public static string SplitStepSuffix(string itemName, out int step)
         {
             step = 0;
             int idx = itemName.LastIndexOf(" (Step ");
             if (idx < 0 || !itemName.EndsWith(")")) return itemName;
             string num = itemName.Substring(idx + 7, itemName.Length - idx - 8);
-            byte parsed;
-            if (!byte.TryParse(num, out parsed)) return itemName;
+            int parsed;
+            if (!int.TryParse(num, out parsed)) return itemName;
             step = parsed;
             return itemName.Substring(0, idx);
         }
@@ -580,7 +845,7 @@ namespace CloneDroneAP
             {
                 if (!_initialized || _text == null) return;
                 if (Time.unscaledTime < _nextUpdate) return;
-                _nextUpdate = Time.unscaledTime + 0.25f;
+                _nextUpdate = Time.unscaledTime + (ScrapCollector.ComboActive ? 0.05f : 0.25f);
 
                 string s = BuildText();
                 if (s != _last)
@@ -604,7 +869,14 @@ namespace CloneDroneAP
                 }
 
                 _sb.Length = 0;
-                _sb.Append(levelId).Append("  Step ").Append(Plugin.CurrentStepNumber).Append("  Keys ").Append(Plugin.KeysReceived).Append('\n');
+                _sb.Append(levelId);
+                if (Plugin.CurrentGoal != "scrap_collector") _sb.Append("  Step ").Append(Plugin.CurrentStepNumber).Append("  Keys ").Append(Plugin.KeysReceived);
+                _sb.Append('\n');
+                if (ScrapCollector.Active)
+                {
+                    _sb.Append(ScrapCollector.HudLine()).Append('\n');
+                    if (ScrapCollector.ComboActive) _sb.Append(ScrapCollector.ComboLine()).Append('\n');
+                }
 
                 GameFlowManager flow = Singleton<GameFlowManager>.Instance;
                 bool inCombat = flow != null && flow.IsInCombat();
@@ -989,12 +1261,12 @@ namespace CloneDroneAP
 
         public static void RecalculateFreeUpgrades()
         {
-            NextUpgradesFree = (byte)Mathf.Max(0, (int)TotalFreeUpgradesReceived - NextFreeUsed);
+            NextUpgradesFree = Mathf.Max(0, TotalFreeUpgradesReceived - NextFreeUsed);
         }
 
         public static void RecalculateStartArmor()
         {
-            StartWithArmor_left = (byte)Mathf.Max(0, (int)TotalStartArmorReceived - StartArmorUsed);
+            StartWithArmor_left = Mathf.Max(0, TotalStartArmorReceived - StartArmorUsed);
         }
 
         public void ApplyArmorToSpecificPart(Character character, MechBodyPartType targetPart)
@@ -1039,21 +1311,21 @@ namespace CloneDroneAP
 
         static List<MechBodyPartType> armor_before_infinite = new List<MechBodyPartType> { };
         public static float infinite_armor_seconds = 0;
-        public static byte TotalInfiniteArmorReceived = 0;
-        public static byte InfiniteArmorUsed = 0;
-        public static byte InfiniteArmor_left = 0;
+        public static int TotalInfiniteArmorReceived = 0;
+        public static int InfiniteArmorUsed = 0;
+        public static int InfiniteArmor_left = 0;
 
-        public static byte TotalCloneFillerReceived = 0;
-        public static byte StartCloneUsed = 0;
-        public static byte StartClone_left = 0;
+        public static int TotalCloneFillerReceived = 0;
+        public static int StartCloneUsed = 0;
+        public static int StartClone_left = 0;
         private static float _nextCloneGrantTime = 0f;
-        public static byte betterWeapon = 0;
+        public static int betterWeapon = 0;
 
         public static float WeaponMultiplier
         {
             get { return Mathf.Pow(1.076f, betterWeapon); }//3x si 15
         }
-        public static byte betterEnergy = 0;
+        public static int betterEnergy = 0;
 
         public static float EnergyMultiplier
         {
@@ -1062,7 +1334,7 @@ namespace CloneDroneAP
 
         public static void RecalculateStartClone()
         {
-            StartClone_left = (byte)Mathf.Max(0, (int)TotalCloneFillerReceived - StartCloneUsed);
+            StartClone_left = Mathf.Max(0, TotalCloneFillerReceived - StartCloneUsed);
         }
 
         private static bool CanGrantCloneNow()
@@ -1086,14 +1358,14 @@ namespace CloneDroneAP
         public static void ConsumeStartClone()
         {
             CloneManager.Instance.CreateClone(cloneInitiateByPlayer: false);
-            if (StartCloneUsed < byte.MaxValue) StartCloneUsed++;
+            StartCloneUsed++;
             RecalculateStartClone();
             _nextCloneGrantTime = Time.unscaledTime + 2f;   // un clone à la fois
             SendToClient("STARTCLONE_USED");
         }
         public static void RecalculateInfiniteArmor()
         {
-            InfiniteArmor_left = (byte)Mathf.Max(0, (int)TotalInfiniteArmorReceived - InfiniteArmorUsed);
+            InfiniteArmor_left = Mathf.Max(0, TotalInfiniteArmorReceived - InfiniteArmorUsed);
         }
 
         public static void ConsumeInfiniteArmor(Character p)
@@ -1106,7 +1378,7 @@ namespace CloneDroneAP
                 }
             }
             infinite_armor_seconds += 61f;
-            if (InfiniteArmorUsed < byte.MaxValue) InfiniteArmorUsed++;
+            InfiniteArmorUsed++;
             RecalculateInfiniteArmor();
             SendToClient("INFINITEARMOR_USED");
         }
@@ -1123,6 +1395,33 @@ namespace CloneDroneAP
 
         Character player;
 
+        // Progressive Weapon Boost : un clone (vie supplémentaire) crée un NOUVEAU corps, dont les armes sont créées
+        // avant que le jeu le désigne "joueur principal" : le patch WeaponModel.SetOwner ne leur applique alors pas le boost.
+        // On réapplique donc le boost dès que le corps du joueur change, puis toutes les secondes (Apply est idempotent).
+        private int _boostedPlayerId = 0;
+        private float _nextBoostReapply = 0f;
+
+        private void ReapplyWeaponBoostIfNeeded()
+        {
+            if (betterWeapon <= 0) return;
+
+            CharacterTracker tracker = Singleton<CharacterTracker>.Instance;
+            FirstPersonMover robot = tracker != null ? tracker.GetPlayerRobot() : null;
+            if (robot == null)
+            {
+                _boostedPlayerId = 0;
+                return;
+            }
+
+            int id = robot.GetInstanceID();
+            if (id != _boostedPlayerId || Time.unscaledTime >= _nextBoostReapply)
+            {
+                _boostedPlayerId = id;
+                _nextBoostReapply = Time.unscaledTime + 1f;
+                SwordSizePatch.ReapplyAll();
+            }
+        }
+
         private void Update()
         {
             if (player == null)
@@ -1134,15 +1433,20 @@ namespace CloneDroneAP
             GameFlowManager flow = Singleton<GameFlowManager>.Instance;
             bool inCombat = flow != null && flow.IsInCombat();
 
+            // IsInCombat() reste vrai quelques secondes après la victoire d'un round : on exige aussi !HasWonRound() (même instance)
+            ScrapCollector.Tick(Time.deltaTime, inCombat && !flow.HasWonRound());
+
+            ReapplyWeaponBoostIfNeeded();
+
             if (StartClone_left > 0 && CanGrantCloneNow())
             {
                 ConsumeStartClone();
             }
 
             if (InfiniteArmor_left != 0 && player != null && player.IsAlive() && inCombat)
-                {
-                    ConsumeInfiniteArmor(player);
-                }
+            {
+                ConsumeInfiniteArmor(player);
+            }
 
             if (infinite_armor_seconds > 0f && player != null && player.IsAlive() && inCombat)
             {
@@ -1197,35 +1501,49 @@ namespace CloneDroneAP
                     continue;
                 }
 
+                if (message.StartsWith("USED:Scrap:"))
+                {
+                    long restoredScrap;
+                    if (long.TryParse(message.Substring(11), out restoredScrap)) ScrapCollector.Restore(restoredScrap);
+                    continue;
+                }
+
                 if (message.StartsWith("USED:"))
                 {
                     string[] up = message.Split(':');
                     int n;
                     if (up.Length == 3 && int.TryParse(up[2], out n))
                     {
-                        byte v = (byte)Mathf.Clamp(n, 0, 255);
+                        int v = Mathf.Max(0, n);
                         if (up[1] == "NextFree")
                         {
-                            NextFreeUsed = (byte)Mathf.Max((int)NextFreeUsed, (int)v);
+                            NextFreeUsed = Mathf.Max(NextFreeUsed, v);
                             RecalculateFreeUpgrades();
                         }
                         else if (up[1] == "StartClone")
                         {
-                            StartCloneUsed = (byte)Mathf.Max((int)StartCloneUsed, (int)v);
+                            StartCloneUsed = Mathf.Max(StartCloneUsed, v);
                             RecalculateStartClone();
                         }
                         else if (up[1] == "StartArmor")
                         {
-                            StartArmorUsed = (byte)Mathf.Max((int)StartArmorUsed, (int)v);
+                            StartArmorUsed = Mathf.Max(StartArmorUsed, v);
                             RecalculateStartArmor();
                         }
                         else if (up[1] == "60sInfiniteArmor")
                         {
-                            InfiniteArmorUsed = (byte)Mathf.Max((int)InfiniteArmorUsed, (int)v);
+                            InfiniteArmorUsed = Mathf.Max(InfiniteArmorUsed, v);
                             RecalculateInfiniteArmor();
                         }
                         RefreshUpgradeShop();
                     }
+                    continue;
+                }
+
+                if (message.StartsWith("COOP:"))
+                {
+                    long coopAdjust;
+                    if (long.TryParse(message.Substring(5), out coopAdjust)) ScrapCollector.CoopAdjust = Math.Max(0L, coopAdjust);
                     continue;
                 }
 
@@ -1249,24 +1567,27 @@ namespace CloneDroneAP
             string[] parts = data.Split('|');
             if (parts.Length < 3) return;
 
+            // Nouvelle run si le slot ou la room change (les scrap ne sont remis à zéro que dans ce cas)
+            bool newRun = parts[0].Trim() != CurrentSlotName || parts[1].Trim() != CurrentRoomName;
             CurrentSlotName = parts[0].Trim();
             CurrentRoomName = parts[1].Trim();
             string[] goalParts = parts[2].Trim().ToLower().Split(':');
             CurrentGoal = goalParts[0];
-            int sessionKeysMode;
-            KeysMode = (goalParts.Length > 1 && int.TryParse(goalParts[1], out sessionKeysMode))
-                ? Mathf.Clamp(sessionKeysMode, 0, 2)
-                : 0;
+            // Le nombre après ":" = keys_mode (unités, 0..2) + 10 x palier de scrap (dizaines : 1 = 100k, 2 = 1000k, 3 = 10000k)
+            int sessionRaw = 0;
+            if (goalParts.Length > 1) int.TryParse(goalParts[1], out sessionRaw);
+            KeysMode = Mathf.Clamp(sessionRaw % 10, 0, 2);
+            ScrapCollector.Configure(CurrentGoal == "scrap_collector", sessionRaw / 10, newRun);
             KeysReceived = 0;
             LockedStep = 0;
             int sessionPrice;
             MaxShopDiscount = (parts.Length >= 5 && int.TryParse(parts[4].Trim(), out sessionPrice))
                 ? Mathf.Clamp(sessionPrice, 1, 5)
                 : 3;
-            byte sessionOverpriced;
-            OverpricedShop = (parts.Length >= 6 && byte.TryParse(parts[5].Trim(), out sessionOverpriced))
-                ? (byte)Mathf.Min((int)sessionOverpriced, 10)
-                : (byte)0;
+            int sessionOverpriced;
+            OverpricedShop = (parts.Length >= 6 && int.TryParse(parts[5].Trim(), out sessionOverpriced))
+                ? Mathf.Clamp(sessionOverpriced, 0, 10)
+                : 0;
             OverpricedShop_map.Clear();
             Confusion.Clear();
             if (parts.Length >= 7)
@@ -1313,6 +1634,7 @@ namespace CloneDroneAP
             RecalculateInfiniteArmor();
             RecalculateFreeUpgrades();
             RecalculateStartArmor();
+            ScrapCollector.Resend();
         }
 
         public static void SendBuyToPython(string upgradeType, int level)
@@ -1327,7 +1649,7 @@ namespace CloneDroneAP
 
         public static void ConsumeNextFree()
         {
-            if (NextFreeUsed < byte.MaxValue) NextFreeUsed++;
+            NextFreeUsed++;
             RecalculateFreeUpgrades();
             SendToClient("NEXTFREE_USED");
         }
@@ -1335,7 +1657,7 @@ namespace CloneDroneAP
         // Idem pour Start with Armor
         public static void ConsumeStartArmor()
         {
-            if (StartArmorUsed < byte.MaxValue) StartArmorUsed++;
+            StartArmorUsed++;
             RecalculateStartArmor();
             SendToClient("STARTARMOR_USED");
         }
@@ -1343,6 +1665,29 @@ namespace CloneDroneAP
         public static void ap_grant_item(string itemName)
         {
             Log.LogInfo($"[ARCHIPELAGO] Got : {itemName}");
+
+            if (itemName == "Combo Strength") { ScrapCollector.ComboStrengthCount++; return; }
+            if (itemName == "More Scrap") { ScrapCollector.MoreScrapCount++; return; }
+            if (itemName == "Combo Time") { ScrapCollector.ComboTimeCount++; return; }
+            if (itemName == "Plain Scrap Gain") { ScrapCollector.PlainScrapCount++; return; }
+
+            if (itemName == "Small Scrap")
+            {
+                if (ScrapCollector.Active) ScrapCollector.AddBonus(ScrapCollector.SmallScrapItemValue);
+                return;
+            }
+
+            if (itemName == "Scrap")
+            {
+                ScrapCollector.AddBonus(ScrapCollector.ScrapItemValue);
+                return;
+            }
+
+            if (itemName == "Big Scrap")
+            {
+                ScrapCollector.AddBonus(ScrapCollector.BigScrapItemValue);
+                return;
+            }
 
             if (itemName.StartsWith("ShopDiscount"))
             {
@@ -1353,7 +1698,7 @@ namespace CloneDroneAP
 
             if (itemName == "Free Clone")
             {
-                TotalCloneFillerReceived = (byte)Mathf.Min(255, TotalCloneFillerReceived + 1);
+                TotalCloneFillerReceived++;
                 RecalculateStartClone();
                 return;
             }
@@ -1371,7 +1716,7 @@ namespace CloneDroneAP
                 return;
             }
 
-            if (itemName ==  "Next Upgrade Free")
+            if (itemName == "Next Upgrade Free")
             {
                 TotalFreeUpgradesReceived++;
                 RecalculateFreeUpgrades();
@@ -1388,22 +1733,21 @@ namespace CloneDroneAP
 
             if (itemName == "3 Start With Armor")
             {
-                TotalStartArmorReceived = (byte)Mathf.Min(255, TotalStartArmorReceived + 3);
+                TotalStartArmorReceived += 3;
                 RecalculateStartArmor();
                 return;
             }
 
             if (itemName == "120s of Infinite Armor")
             {
-                TotalInfiniteArmorReceived++;
-                TotalInfiniteArmorReceived++;
+                TotalInfiniteArmorReceived += 2;
                 RecalculateInfiniteArmor();
                 return;
             }
 
             if (itemName == "6 Start With Armor")
             {
-                TotalStartArmorReceived = (byte)Mathf.Min(255, TotalStartArmorReceived + 6);
+                TotalStartArmorReceived += 6;
                 RecalculateStartArmor();
                 return;
             }
@@ -1415,16 +1759,16 @@ namespace CloneDroneAP
                 return;
             }
 
-            byte step;
+            int step;
             string baseName = SplitStepSuffix(itemName, out step);
 
             if (baseName == "Shop Discount")
             {
                 if (step > 0)
                 {
-                    byte ownedDiscounts;
+                    int ownedDiscounts;
                     StepShopDiscounts.TryGetValue(step, out ownedDiscounts);
-                    StepShopDiscounts[step] = (byte)(ownedDiscounts + 1);
+                    StepShopDiscounts[step] = ownedDiscounts + 1;
                 }
                 else
                 {
@@ -1438,9 +1782,9 @@ namespace CloneDroneAP
             {
                 if (step > 0)
                 {
-                    byte owned;
-                    StepHammerLevels.TryGetValue((byte)step, out owned);
-                    StepHammerLevels[step] = (byte)(owned + 1);
+                    int owned;
+                    StepHammerLevels.TryGetValue(step, out owned);
+                    StepHammerLevels[step] = owned + 1;
                 }
                 else
                 {
@@ -1624,6 +1968,7 @@ namespace CloneDroneAP
                 Plugin.infinite_armor_seconds += 12f;
             }
 
+            // En Scrap Collector, GetGoalLevel() vaut -1 : ce bloc est ignoré, la partie ne s'arrête jamais d'elle-même
             int goalLevel = Plugin.GetGoalLevel();
             if (goalLevel > 0)
             {
@@ -1656,7 +2001,11 @@ namespace CloneDroneAP
                 }
             }
 
-            Plugin.SendCheckToPython(totalLevelsWon);
+            ScrapCollector.Commit();   // valide les scrap gagnés pendant le niveau
+            if (Plugin.CurrentGoal != "scrap_collector") Plugin.SendCheckToPython(totalLevelsWon);   // pas de checks de niveau en Scrap Collector
+
+            // Scrap Collector : nouveau scénario tiré dans la liste à chaque fin de niveau
+            Plugin.RerollScenarioIfNeeded();
         }
     }
 
@@ -1755,7 +2104,7 @@ namespace CloneDroneAP
         {
             __state = __instance.ImpactMultiplier;
             if (__instance.Owner != null && __instance.Owner.IsMainPlayer())
-                __instance.ImpactMultiplier = __state * Plugin.WeaponMultiplier;
+                __instance.ImpactMultiplier = __state * Plugin.WeaponMultiplier * 1.25f;
         }
 
         static System.Exception Finalizer(HammerImpactMeleeArea __instance, float __state, System.Exception __exception)
@@ -1800,7 +2149,8 @@ namespace CloneDroneAP
                 boxed = wm.transform.localScale;
                 _baseScale.Add(wm, boxed);
             }
-            wm.transform.localScale = (Vector3)boxed * Plugin.WeaponMultiplier;
+            // l'épée ne grossit jamais au-delà de x3, quel que soit le nombre de Progressive Weapon Boost
+            wm.transform.localScale = (Vector3)boxed * Mathf.Min(3f, Plugin.WeaponMultiplier * 0.8f);
         }
 
         [HarmonyPatch(typeof(ArrowProjectile), "StartFlying",
@@ -1826,7 +2176,7 @@ namespace CloneDroneAP
                 }
 
                 bool fromPlayer = owner != null && owner.IsMainPlayer();
-                __instance.VelocityMagnitude = (float)boxed * (fromPlayer ? Plugin.WeaponMultiplier : 1f);
+                __instance.VelocityMagnitude = (float)boxed * (fromPlayer ? (Plugin.WeaponMultiplier * 1.2f) : 1f);
             }
         }
 
@@ -1876,7 +2226,7 @@ namespace CloneDroneAP
             }
         }
 
-        // à appeler quand un boost arrive en pleine partie
+        // à appeler quand un boost arrive en pleine partie, et par Plugin.Update quand le corps du joueur change (clone)
         public static void ReapplyAll()
         {
             CharacterTracker tracker = Singleton<CharacterTracker>.Instance;
@@ -1933,7 +2283,7 @@ namespace CloneDroneAP
             if (__instance.Sawblade != null) __instance.Sawblade.SetActive(false);
 
             Plugin.RefreshMultiplayerLabel();
-            return false; 
+            return false;
         }
     }
 
@@ -2032,6 +2382,8 @@ namespace CloneDroneAP
             {
                 string killerName = (killer != null) ? killer.CharacterType.ToString() : "Inconnu";
                 Plugin.Log.LogInfo($"[ARCHIPELAGO/ENNEMI TUÉ] Type: {__instance.CharacterType} | Tué par: {killerName} | Arme/Source: {damageSourceType}");
+
+                ScrapCollector.GetScore(__instance.CharacterType);
             }
         }
     }
@@ -2358,6 +2710,13 @@ namespace CloneDroneAP
     {
         static void Postfix(Character character)
         {
+            // Scrap Collector : à la mort du joueur, les scrap gagnés pendant cette vie sont validés (aussi pour un DeathLink)
+            if (character != null && character.IsMainPlayer())
+            {
+                ScrapCollector.Commit();
+                ScrapCollector.ResetCombo();   // mort : le combo est perdu (il survit seulement à une victoire)
+            }
+
             if (Plugin.IsDyingFromDeathLink) return;
 
             if (character != null && character.IsMainPlayer() && !character.IsNeutral)
@@ -2486,7 +2845,7 @@ namespace CloneDroneAP
             _overpricedKey = key;
 
             Plugin.OverpricedShop_map.Clear();
-            int count = Mathf.Min((int)Plugin.OverpricedShop, (int)38);
+            int count = Mathf.Min(Plugin.OverpricedShop, 38);
 
             while (Plugin.OverpricedShop_map.Count < count)
             {
@@ -2505,7 +2864,7 @@ namespace CloneDroneAP
 
         private static IEnumerator ApplyArmorRoutine(FirstPersonMover player)
         {
-            yield return null; 
+            yield return null;
 
             if (player == null || !player.IsAlive() || Plugin.StartWithArmor_left == 0) yield break;
 
@@ -2586,8 +2945,8 @@ namespace CloneDroneAP
         {
             InSummon = false;
             if (__exception != null)
-                Plugin.Log.LogError("[AP] SummonAlly: " + __exception); 
-            return __exception; 
+                Plugin.Log.LogError("[AP] SummonAlly: " + __exception);
+            return __exception;
         }
     }
 
@@ -2616,6 +2975,23 @@ namespace CloneDroneAP
         }
     }
 
+    [HarmonyPatch(typeof(FirstPersonMover), "getWeaponDisabledTimeAfterCut")]
+    public class SpearCooldownPatch
+    {
+        static void Postfix(FirstPersonMover __instance, ref float __result)
+        {
+            // Vérifie si le joueur est le joueur principal et s'il utilise la lance
+            if (__instance != null && __instance.IsMainPlayer() && __instance.GetEquippedWeaponType() == WeaponType.Spear)
+            {
+                // Réduit le temps de cooldown proportionnellement au boost de la lance
+                if (Plugin.betterWeapon > 0)
+                {
+                    __result /= Plugin.WeaponMultiplier;
+                }
+            }
+        }
+    }
+
 
     [HarmonyPatch]
     public class SpeechCoroutineSafetyPatch
@@ -2635,8 +3011,8 @@ namespace CloneDroneAP
             var mgr = Singleton<SpeechAudioManager>.Instance;
             if (mgr != null)
                 AccessTools.Field(typeof(SpeechAudioManager), "_loadingClipFromResources")?.SetValue(mgr, false);
-            __result = false; 
-            return null; 
+            __result = false;
+            return null;
         }
     }
 }

@@ -108,18 +108,59 @@ item_table["Free Clone"] = ItemData(BASE_ITEM_ID + 71, ItemClassification.filler
 item_table["Progressive Energy Boost"] = ItemData(BASE_ITEM_ID + 72, ItemClassification.filler)
 item_table["Progressive Weapon Boost"] = ItemData(BASE_ITEM_ID + 73, ItemClassification.filler)
 
+# Scrap : filler du mode Scrap Collector / Scrap Anywhere (inutile dans un goal Reach sans scrap).
+# "Scrap" = 500 scrap, "Big Scrap" = 5000 scrap (20 % des "Scrap" deviennent "Big Scrap").
+# Les valeurs sont dupliquées dans client.py (SCRAP_ITEM_VALUES) et Class1.cs (ScrapItemValue / BigScrapItemValue).
+item_table["Scrap"] = ItemData(BASE_ITEM_ID + 74, ItemClassification.filler)
+item_table["Big Scrap"] = ItemData(BASE_ITEM_ID + 75, ItemClassification.filler)
+
+# Mode scrap (Scrap Collector ou Scrap Anywhere) : 2 items de progression et 2 fillers.
+# Combo Strength / More Scrap : plusieurs exemplaires selon le scrap requis (voir scrap_progression_copies).
+# Combo Strength : +0.1x de multiplicateur de combo par kill. More Scrap : +1x sur tous les kills.
+# Combo Time : +0.5 s par combo (kill) et +1 s sur les 10 s de reprise, par exemplaire. Plain Scrap Gain : +1 scrap par kill, avant les multiplicateurs.
+item_table["Combo Strength"] = ItemData(BASE_ITEM_ID + 76, ItemClassification.progression)
+item_table["More Scrap"] = ItemData(BASE_ITEM_ID + 77, ItemClassification.progression)
+item_table["Combo Time"] = ItemData(BASE_ITEM_ID + 78, ItemClassification.filler)
+item_table["Plain Scrap Gain"] = ItemData(BASE_ITEM_ID + 79, ItemClassification.filler)
+
+# "Small Scrap" : filler quasi inutile. Scrap actif : +10 scrap (valeur dupliquée dans client.py et Class1.cs). Scrap inactif : rien.
+# Il remplace les Free Clone / Progressive Weapon Boost / Progressive Energy Boost au-delà de FILLER_CAPS, et entre dans
+# la liste des fillers (poids SMALL_SCRAP_WEIGHT) dès que le joueur a plus de SMALL_SCRAP_LOCATION_THRESHOLD locations.
+SMALL_SCRAP = "Small Scrap"
+SMALL_SCRAP_VALUE = 10
+SMALL_SCRAP_LOCATION_THRESHOLD = 1075
+SMALL_SCRAP_WEIGHT = 5
+item_table[SMALL_SCRAP] = ItemData(BASE_ITEM_ID + 80, ItemClassification.filler)
+
+# Nombre maximum d'exemplaires générés (pour chacun) ; les tirages suivants deviennent des "Small Scrap".
+FILLER_CAPS = {"Free Clone": 100, "Progressive Weapon Boost": 100, "Progressive Energy Boost": 100}
+
+SCRAP_PROGRESSION_ITEMS = ("Combo Strength", "More Scrap")
+SCRAP_ONLY_FILLERS = ("Scrap", "Combo Time", "Plain Scrap Gain")   # inutiles sans système de scrap
+
+# Exemplaires de chaque item de SCRAP_PROGRESSION_ITEMS selon le scrap requis (HowMuchScrap) : 100k -> 1, 1000k -> 3, 10000k -> 6
+SCRAP_PROGRESSION_COPIES = {100_000: 1, 1_000_000: 3, 10_000_000: 6}
+
+
+def scrap_progression_copies(required_scrap: int) -> int:
+    """Nombre d'exemplaires de "Combo Strength" et de "More Scrap" pour ce scrap requis (chacun)."""
+    return SCRAP_PROGRESSION_COPIES.get(required_scrap, 1)
+
 FILLER_UPGRADE_CHANCE = 0.33
+SCRAP_UPGRADE_CHANCE = 0.20
+FILLER_UPGRADE_CHANCES: Dict[str, float] = {"Scrap": SCRAP_UPGRADE_CHANCE}   # défaut : FILLER_UPGRADE_CHANCE
 FILLER_UPGRADES: Dict[str, str] = {
     "60s of Infinite Armor": "120s of Infinite Armor",
     "3 Start With Armor":    "6 Start With Armor",
+    "Scrap":                 "Big Scrap",
 }
 
 
 def roll_filler_name(base_name: str, rng) -> str:
-    """Retourne la variante x2 du filler avec 33 % de chance, sinon le filler de base.
+    """Retourne la variante du filler (x2 : 33 % ; Scrap -> Big Scrap : 20 %), sinon le filler de base.
     `rng` = world.random (ou tout objet random.Random)."""
     upgraded = FILLER_UPGRADES.get(base_name)
-    if upgraded is not None and rng.random() < FILLER_UPGRADE_CHANCE:
+    if upgraded is not None and rng.random() < FILLER_UPGRADE_CHANCES.get(base_name, FILLER_UPGRADE_CHANCE):
         return upgraded
     return base_name
 

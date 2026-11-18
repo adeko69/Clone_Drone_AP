@@ -1,4 +1,4 @@
-from BaseClasses import Region, Item, ItemClassification
+from BaseClasses import Region, Item, ItemClassification, LocationProgressType
 from .items import KEY_ITEM
 from .locations import location_table, CloneDroneLocation, get_active_location_names, LOCATION_STEP
 
@@ -19,11 +19,14 @@ def create_regions(world):
         regions = [Region("Arena", player, world.multiworld)]
 
     # Locations dynamiques selon le goal et le nombre de steps
-    for location_name in get_active_location_names(goal_val, step_val, getattr(world, "skipped_checks", ())):
+    for location_name in get_active_location_names(
+            goal_val, step_val, getattr(world, "skipped_checks", ()), getattr(world, "scrap_thresholds", ())):
         region = regions[LOCATION_STEP[location_name] - 1] if gated else regions[0]
-        region.locations.append(
-            CloneDroneLocation(player, location_name, location_table[location_name].code, region)
-        )
+        location = CloneDroneLocation(player, location_name, location_table[location_name].code, region)
+        if location_name in getattr(world, "low_scrap_names", ()):
+            # Checks "bas" du Scrap Collector : le fill y place d'abord des items de progression (très peu de fillers)
+            location.progress_type = LocationProgressType.PRIORITY
+        region.locations.append(location)
 
     # Event de victoire : dans le dernier step
     last_region = regions[-1]

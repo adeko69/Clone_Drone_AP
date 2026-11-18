@@ -7,14 +7,21 @@ from .items import (
     item_table, CloneDroneItem, SPLIT_PARENTS, SPLIT_PARTS, UPGRADE_ITEMS, ITEM_COPIES, step_item_name,
     UPGRADE_GLOBAL_UNGROUPED, UPGRADE_PER_STEP_GROUPED, UPGRADE_PER_STEP_UNGROUPED,
     shop_discount_step_name, MAX_SKILLPOINT_PRICE, KEY_ITEM, key_count, roll_filler_name,
+    SCRAP_PROGRESSION_ITEMS, SCRAP_ONLY_FILLERS, scrap_progression_copies,
+    SMALL_SCRAP, SMALL_SCRAP_LOCATION_THRESHOLD, SMALL_SCRAP_WEIGHT, FILLER_CAPS,
 )
 from .locations import (
     location_table, GOAL_LEVELS, get_active_location_names, get_level_names_by_step, LOCATION_STEP, LOCATION_UPGRADE,
+    GOAL_SCRAP_COLLECTOR, REQUIRED_SCRAP, scrap_names, scrap_thresholds, low_scrap_thresholds,
 )
 from .upgrade_data import split_step_suffix, item_blocked_at, win_step_name, upgrade_location_id
 from .regions import create_regions
 from .rules import set_rules
-from .options import CloneDroneOptions, CloneDroneOptions, FillerNextUpgradeFree, FillerStartWithArmor, FillerInfiniteArmor, FillerEnergyBoost, FillerWeaponBoost, Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode, Undead, Doggos, Summoners, ConfusionInferno, ConfusionSprinter, ConfusionRaptor, ConfusionTotallyRandom, ConfusionArmor, ConfusionLevelUp, ConfusionEasyMode, ConfusionUndead, ConfusionDoggos, ConfusionSummoners
+from .options import (
+    CloneDroneGoal, Steps, UpgradeMode, StepIsStepLocked, MultiStepKeys, StepKeyLocation, StepShopDiscountPerStep,
+    ScrapAnywhere, HowMuchScrap, LocationPerScrapPercent, ScrapEarlyChecks,
+)
+from .options import CloneDroneOptions, FillerComboTime, FillerPlainScrapGain, ScrapCoop, FillerFreeClone, FillerScrap, FillerNextUpgradeFree, FillerStartWithArmor, FillerInfiniteArmor, FillerEnergyBoost, FillerWeaponBoost, Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode, Undead, Doggos, Summoners, ConfusionInferno, ConfusionSprinter, ConfusionRaptor, ConfusionTotallyRandom, ConfusionArmor, ConfusionLevelUp, ConfusionEasyMode, ConfusionUndead, ConfusionDoggos, ConfusionSummoners
 from .steps import plan_step_items, GLOBAL_PRIORITY
 from .logic import stuck_prefills
 from worlds.LauncherComponents import Component, components, Type, launch_subprocess
@@ -64,7 +71,12 @@ class CloneDroneWeb(WebWorld):
     # Chaque groupe devient un onglet (Options Creator du lanceur, page d'options du site).
     # Les options hors groupe restent dans "Game Options". Le YAML ne change pas.
     option_groups = [
-        OptionGroup("Filler", [FillerNextUpgradeFree, FillerStartWithArmor, FillerInfiniteArmor, FillerEnergyBoost, FillerWeaponBoost]),
+        OptionGroup("Step (Reach Goal)", [
+            Steps, UpgradeMode, StepIsStepLocked,
+            MultiStepKeys, StepKeyLocation, StepShopDiscountPerStep,
+        ]),
+        OptionGroup("Scrap Collector", [ScrapAnywhere, HowMuchScrap, LocationPerScrapPercent, ScrapEarlyChecks, ScrapCoop]),
+        OptionGroup("Filler", [FillerFreeClone, FillerNextUpgradeFree, FillerStartWithArmor, FillerInfiniteArmor, FillerEnergyBoost, FillerWeaponBoost, FillerScrap, FillerComboTime, FillerPlainScrapGain]),
         OptionGroup("Scenario", [Normal, Inferno, Sprinter, Raptor, TotallyRandom, Armor, LevelUp, EasyMode, Undead, Doggos, Summoners]),
         OptionGroup("Confusion", [ConfusionInferno, ConfusionSprinter, ConfusionRaptor, ConfusionTotallyRandom, ConfusionArmor, ConfusionLevelUp, ConfusionEasyMode, ConfusionUndead, ConfusionDoggos, ConfusionSummoners]),
     ]
@@ -85,6 +97,31 @@ class CloneDroneWorld(World):
         self.prefill = []   # [(location, item)] posés dans pre_fill
 
         o = self.options
+
+        # Mode Scrap Collector : pas de steps (donc ni clés ni objets par step), upgrades Global Ungrouped.
+        # À faire AVANT tout le reste : scènes, armes, checks sautés... lisent tous "steps" et "upgrade_mode".
+        self.scrap_collector = int(o.goal.value) == GOAL_SCRAP_COLLECTOR
+        if self.scrap_collector:
+            o.steps.value = 1
+            o.upgrade_mode.value = UPGRADE_GLOBAL_UNGROUPED
+            o.multi_step_keys.value = 0
+            o.step_is_step_locked.value = 0
+            o.step_shop_discount_per_step.value = STEP_DISCOUNT_NEVER
+            # L'arme de départ passe par la Scene (X:Y), qui n'existe plus dans ce mode : seul "Every Death" (tiré par le jeu) reste
+            if int(o.randomize_starting_weapon.value) in (WEAPON_MODE_SAME, WEAPON_MODE_RANDOM):
+                o.randomize_starting_weapon.value = WEAPON_MODE_NONE
+
+        # Système de scrap : toujours en Scrap Collector, optionnel (Scrap Anywhere) en mode Step
+        self.scrap_enabled = self.scrap_collector or bool(o.scrap_anywhere.value)
+        self.required_scrap = REQUIRED_SCRAP[int(o.required_scrap.value)]
+        self.scrap_thresholds = (scrap_thresholds(self.required_scrap, int(o.scrap_locations.value), self.random)
+                                 if self.scrap_enabled else [])   # triés ; chaque seuil = une location "Scrap Check - 107,000"
+        # Scrap Collector seulement : X "Early Checks" en plus (multiples de 10, 100 à 9990), placés en priorité
+        low = low_scrap_thresholds(int(o.scrap_early_checks.value), self.random) if self.scrap_collector else []
+        self.low_scrap_names = set(scrap_names(low))
+        self.scrap_thresholds = sorted(self.scrap_thresholds + low)
+        self.scrap_count = len(self.scrap_thresholds)
+
         self.step_locked = (
             bool(o.step_is_step_locked.value)
             and int(o.upgrade_mode.value) in (UPGRADE_PER_STEP_GROUPED, UPGRADE_PER_STEP_UNGROUPED)
@@ -109,6 +146,10 @@ class CloneDroneWorld(World):
         scenario_values = generate_scene(scenarios, o.steps.value, self.random)
         self.weapons = self._draw_weapons()
         self.scene = format_scene(scenario_values, self.weapons)   # "X:Y;X:Y;..."
+        if self.scrap_collector:
+            # Scrap Collector : pas de step, la scène est juste la liste des scénarios activés ("0:1:2:3").
+            # Le jeu en tire un au hasard à chaque niveau.
+            self.scene = ":".join(str(sc) for sc in scenarios)
         # Pas de check d'achat pour l'arme de départ de chaque step (déjà possédée) : épée, arc, marteau niv. I, lance
         # Every Death : l'arme n'est que prêtée à chaque vie, donc TOUS les checks d'unlock existent
         if int(o.randomize_starting_weapon.value) == WEAPON_MODE_EVERY_DEATH:
@@ -218,6 +259,7 @@ class CloneDroneWorld(World):
 
     def create_items(self) -> None:
         total_locations = len(self.multiworld.get_unfilled_locations(self.player))
+        self.total_locations = total_locations   # lu par _filler_weights (Small Scrap au-delà de SMALL_SCRAP_LOCATION_THRESHOLD)
         mode = int(self.options.upgrade_mode.value)
         ungroup = mode in (UPGRADE_GLOBAL_UNGROUPED, UPGRADE_PER_STEP_UNGROUPED)
         per_step = mode in (UPGRADE_PER_STEP_GROUPED, UPGRADE_PER_STEP_UNGROUPED)
@@ -254,27 +296,52 @@ class CloneDroneWorld(World):
             self._create_global_items(total_locations, ungroup, consumed)
 
 
-    FILLER_TOGGLES = {
+    # Filler -> option qui donne son poids (0 à 10 ; 0 = jamais généré). "Free Clone" va de 1 à 10 : le pool n'est jamais vide.
+    FILLER_WEIGHT_OPTIONS = {
+        "Free Clone":               "filler_free_clone",
         "Next Upgrade Free":        "filler_next_upgrade_free",
         "3 Start With Armor":       "filler_start_with_armor",
         "60s of Infinite Armor":    "filler_infinite_armor",
-        "Free Clone":               None,
         "Progressive Energy Boost": "filler_energy_boost",
         "Progressive Weapon Boost": "filler_weapon_boost",
+        "Scrap":                    "filler_scrap",
+        "Combo Time":               "filler_combo_time",
+        "Plain Scrap Gain":         "filler_plain_scrap_gain",
     }
 
-    def _active_filler_names(self) -> list:
-        return [name for name, attr in self.FILLER_TOGGLES.items()
-                if attr is None or getattr(self.options, attr).value]
+    def _filler_weights(self) -> Dict[str, int]:
+        """{filler: poids} des fillers qui peuvent être générés."""
+        weights = {}
+        for name, attr in self.FILLER_WEIGHT_OPTIONS.items():
+            weight = int(getattr(self.options, attr).value)
+            if name in SCRAP_ONLY_FILLERS and not self.scrap_enabled:
+                weight = 0   # goal Reach sans scrap : ces fillers ne servent à rien
+            if weight > 0:
+                weights[name] = weight
+        # Beaucoup de locations : on ajoute "Small Scrap" (quasi rien) aux fillers, pour ne pas noyer le joueur sous les gros items
+        if getattr(self, "total_locations", 0) > SMALL_SCRAP_LOCATION_THRESHOLD:
+            weights[SMALL_SCRAP] = SMALL_SCRAP_WEIGHT
+        return weights
 
     def _filler_names(self, count: int) -> list:
         count = max(0, count)
-        pool = self._active_filler_names()
-        weights = [self.random.random() for _ in pool]
-        names = self.random.choices(pool, weights=weights, k=count)
-        # 33 % des "3 Start With Armor" / "60s of Infinite Armor" deviennent leur variante x2.
-        # Ces variantes n'ont pas de toggle : elles n'existent que si leur filler de base est actif.
-        return [roll_filler_name(n, self.random) for n in names]
+        weights = self._filler_weights()
+        pool = list(weights)
+        names = self.random.choices(pool, weights=[weights[n] for n in pool], k=count)
+        # Variantes : 33 % des "3 Start With Armor" / "60s of Infinite Armor" deviennent leur version x2,
+        # 20 % des "Scrap" deviennent "Big Scrap". Elles n'ont pas d'option : elles n'existent que si leur filler de base est actif.
+        # Plafond par filler (Free Clone, Weapon Boost, Energy Boost : 100 chacun) : au-delà, le tirage devient un "Small Scrap"
+        made = Counter()
+        result = []
+        for n in names:
+            cap = FILLER_CAPS.get(n)
+            if cap is not None:
+                if made[n] >= cap:
+                    n = SMALL_SCRAP
+                else:
+                    made[n] += 1
+            result.append(roll_filler_name(n, self.random))
+        return result
 
     def _create_global_items(self, total_locations: int, ungroup: bool, consumed: list) -> None:
         weapon_mode = int(self.options.randomize_starting_weapon.value)
@@ -285,6 +352,8 @@ class CloneDroneWorld(World):
                       or (weapon_mode == WEAPON_MODE_SAME and self.weapons[0] != WEAPON_SWORD))
         if not need_sword:
             excluded.add("SwordUnlock")
+        if not self.scrap_enabled:
+            excluded.update(SCRAP_PROGRESSION_ITEMS)   # Combo Strength / More Scrap : seulement avec le système de scrap
         excluded.add("Clone (All Steps)") 
         excluded.add(KEY_ITEM)   # posées par _plan_keys (les éventuelles absentes sont rajoutées plus bas)
         # Seuls les ShopDiscount_1..count entrent dans le pool (les autres n'existent pas pour cette seed)
@@ -296,6 +365,12 @@ class CloneDroneWorld(World):
             for n in item_table
             if n not in excluded and split_step_suffix(n)[1] is None
         }
+        # Combo Strength / More Scrap : 1 exemplaire (100k), 3 (1000k) ou 6 (10000k)
+        scrap_copies = scrap_progression_copies(self.required_scrap)
+        for n in SCRAP_PROGRESSION_ITEMS:
+            if n in counts:
+                counts[n] = scrap_copies
+
         for name in consumed:
             if counts.get(name, 0) > 0:
                 counts[name] -= 1
@@ -328,7 +403,7 @@ class CloneDroneWorld(World):
         weapon_mode = int(self.options.randomize_starting_weapon.value)
 
         step_locs = {k: [] for k in range(1, step_count + 1)}
-        for name in get_active_location_names(goal, step_count, self.skipped_checks):
+        for name in get_active_location_names(goal, step_count, self.skipped_checks, self.scrap_thresholds):
             if name not in locked:
                 step_locs[LOCATION_STEP[name]].append(name)
 
@@ -357,6 +432,8 @@ class CloneDroneWorld(World):
         priority = [f"ShopDiscount_{i}" for i in range(1, self._shop_discount_count() + 1)]
         if step_count > 1:
             priority.insert(0, "Clone (All Steps)")
+        if self.scrap_enabled:
+            priority.extend(n for n in SCRAP_PROGRESSION_ITEMS for _ in range(scrap_progression_copies(self.required_scrap)))   # items globaux, pas par step
         for name in consumed:
             if name in priority:
                 priority.remove(name)
@@ -423,6 +500,12 @@ class CloneDroneWorld(World):
     def _plan_shop_discounts(self, per_step: bool, step_count: int, taken: set) -> list:
         by_step = get_level_names_by_step(int(self.options.goal.value), step_count)
         flat = [n for k in range(1, step_count + 1) for n in by_step[k]]   # progression globale de la run
+        if self.scrap_collector:
+            # Pas de niveaux : la progression de la run, ce sont les paliers de scrap
+            flat = scrap_names(self.scrap_thresholds)
+            if len(flat) < self._shop_discount_count():   # trop peu de paliers : on répartit sur tous les checks
+                flat = [n for n in get_active_location_names(int(self.options.goal.value), step_count,
+                                                             self.skipped_checks, self.scrap_thresholds)]
 
         count = self._shop_discount_count()
         names = [f"ShopDiscount_{i}" for i in range(1, count + 1)]
@@ -431,7 +514,8 @@ class CloneDroneWorld(World):
             if int(self.options.shop_discount_generation.value) == SHOP_GEN_RANDOM:
                 # Tous les emplacements actifs (niveaux, achats d'upgrade...), pas seulement les niveaux.
                 # Seuls les "Win Step" sont exclus (ils portent l'arme du step suivant / la logique des steps).
-                every = get_active_location_names(int(self.options.goal.value), step_count, self.skipped_checks)
+                every = get_active_location_names(int(self.options.goal.value), step_count, self.skipped_checks,
+                                                  self.scrap_thresholds)
                 free = [n for n in every if n not in taken and n not in self.win_step_locations]
                 picks = self.random.sample(free, min(count, len(free)))
                 taken.update(picks)
@@ -474,7 +558,7 @@ class CloneDroneWorld(World):
 
         # Achats d'upgrade encore actifs de chaque step (l'arme de départ, déjà possédée, n'a pas de check)
         purchases = {k: [] for k in range(1, steps + 1)}
-        for name in get_active_location_names(goal, steps, self.skipped_checks):
+        for name in get_active_location_names(goal, steps, self.skipped_checks, self.scrap_thresholds):
             if name in LOCATION_UPGRADE:
                 purchases[LOCATION_STEP[name]].append(name)
 
@@ -509,6 +593,11 @@ class CloneDroneWorld(World):
     def fill_slot_data(self) -> Dict[str, Any]:
         return {
             "goal": int(self.options.goal.value),
+            "scrap_collector": int(self.scrap_collector),
+            "scrap_enabled": int(self.scrap_enabled),
+            "scrap_coop": int(self.options.scrap_coop.value) if self.scrap_enabled else 0,   # 0 = off, 1..5 = 20..100 %
+            "required_scrap": self.required_scrap,
+            "scrap_thresholds": self.scrap_thresholds,
             "multi_step_keys": self.keys_mode,
             "step_key_location": self.key_location_mode,
             "death_link": self.options.death_link.value,
